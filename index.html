@@ -278,6 +278,50 @@ body{background:radial-gradient(ellipse at 8% 4%,color-mix(in srgb,var(--site-ac
 @media(max-width:640px){.scenario-chart-wrap{height:220px}.scenario-title{flex-wrap:wrap;gap:2px 8px}}
 </style>
 <style>.foot a{color:var(--site-accent);text-decoration:none}.foot a:hover{text-decoration:underline}</style>
+<style id="final-polish">
+:root{--surface:#08090b;--surface-raised:#0d0f12;--stroke:#24272b;--stroke-soft:#191c20;--muted:#8d949b}
+body{background:radial-gradient(ellipse at 50% -30%,#15100b 0,transparent 52%),#000}
+.wrap{width:min(1200px,calc(100% - 48px));padding-top:40px}
+.hero{border-color:#25272a;background:radial-gradient(ellipse at 12% 0%,color-mix(in srgb,var(--site-accent) 9%,transparent),transparent 48%),linear-gradient(130deg,#0b0c0e,#060708 72%);box-shadow:inset 0 1px #ffffff08,0 18px 48px #0007}
+.hero:after{opacity:.55}
+.hero-copy{gap:12px}
+.hero p{max-width:46ch;line-height:1.65}
+.session{gap:10px;border-radius:12px}
+.session select{padding:3px 2px}
+.provider-status{transition:background .16s ease,border-color .16s ease,color .16s ease,transform .16s ease}
+.provider-status:hover{transform:translateY(-1px);background:#141619;border-color:#4a5057}
+.provider-status.connected:hover{border-color:#43a984;background:#0e1914}
+.controls{border-color:#22262a;background:linear-gradient(135deg,#0b0d0f,#070809);box-shadow:inset 0 1px #ffffff07,0 14px 38px #0006}
+.field label{letter-spacing:.075em;text-transform:uppercase}
+.field input:hover,.field select:hover,.date-display:hover{border-color:#42474c}
+#new-basket{background:color-mix(in srgb,var(--site-accent) 13%,#0b0c0e);border-color:color-mix(in srgb,var(--site-accent) 43%,#282a2d);color:color-mix(in srgb,var(--site-accent) 70%,#fff);box-shadow:inset 0 1px #ffffff0a,0 6px 20px color-mix(in srgb,var(--site-accent) 8%,transparent)}
+#new-basket:hover{background:color-mix(in srgb,var(--site-accent) 20%,#0b0c0e);border-color:var(--site-accent);box-shadow:0 8px 24px color-mix(in srgb,var(--site-accent) 12%,transparent)}
+.basket-section-head{margin-top:34px}
+.basket-section-head h2{font-size:23px;letter-spacing:-.045em}
+.section-kicker{font-size:10px;letter-spacing:.19em}
+.basket{border-color:color-mix(in srgb,var(--basket-color) 20%,#202326);box-shadow:0 12px 34px #0008,0 0 22px color-mix(in srgb,var(--basket-color) 6%,transparent)}
+.basket:focus-within{border-color:color-mix(in srgb,var(--basket-color) 46%,#34383c);box-shadow:0 14px 38px #0009,0 0 0 1px color-mix(in srgb,var(--basket-color) 14%,transparent)}
+.basket-item{min-height:62px}
+.basket-metrics{border-top:1px solid #ffffff09;margin-top:12px}
+.basket-metrics strong{font-variant-numeric:tabular-nums}
+.content{border-color:#22262a;background:linear-gradient(150deg,#090a0c,#060708 70%);box-shadow:inset 0 1px #ffffff06,0 16px 42px #0008}
+.result-head{padding:0 2px 14px;border-bottom:1px solid #ffffff0b;margin-bottom:16px}
+.ticker h2{font-size:17px;letter-spacing:-.025em}
+.subline{font-size:12px}
+.mini-plot,.main-plot{margin-top:12px}
+.mini-plot h3,.main-plot h3{font-size:10px;letter-spacing:.11em;text-transform:uppercase}
+.mini-chart-wrap,.chart-wrap{border-color:#202327;box-shadow:inset 0 1px #ffffff05,0 10px 28px #0005}
+.chart-wrap{border-radius:14px}
+.basket-legend span{transition:border-color .15s ease,background .15s ease}
+.basket-legend span:hover{border-color:#42474c;background:#101114}
+.legend{color:#7f878e}
+.error{box-shadow:inset 0 1px #ffffff08}
+.foot{padding-top:8px}
+.foot a{font-weight:650}
+:where(button,select,input,a,[tabindex]):focus-visible{outline:2px solid var(--site-accent);outline-offset:3px}
+@media(max-width:760px){.wrap{width:calc(100% - 32px);padding-top:24px}.hero{padding:18px}.session{white-space:normal;flex-wrap:wrap;gap:9px}.controls{gap:12px}.basket-section-head{margin-top:26px}}
+@media(max-width:480px){.wrap{width:calc(100% - 24px);padding-top:18px}.hero{padding:15px}.hero h1{font-size:32px}.controls{grid-template-columns:1fr}.controls .field,.controls .button{grid-column:1}.basket-head{gap:7px}.basket-head h2{max-width:24vw}.basket-head-actions{gap:5px}.basket-item{align-items:flex-start}.basket-metrics{gap:16px 22px}.result-head{gap:8px}.basket-legend{gap:7px}.basket-legend span{max-width:100%;flex-wrap:wrap}}
+</style>
 </head>
 <body><main class="wrap">
 <header class="hero"><div class="hero-copy"><div class="eyebrow"><span class="brand-mark" aria-hidden="true">↗</span><span class="brand-name">STRIKEFLOW</span><span class="brand-separator" aria-hidden="true">·</span><span class="brand-market">NSE OPTIONS</span></div><h1><span>Options</span> <em>P&amp;L</em></h1><p>Track basket performance through the trading day.</p></div><div class="session"><span class="session-dot">●</span><label for="interval">Price interval</label><select id="interval" aria-label="Price interval"><option value="1minute">1 minute</option><option value="5minute" selected>5 minutes</option><option value="15minute">15 minutes</option><option value="30minute">30 minutes</option></select><button id="upstox-status" class="provider-status" type="button">Connect Upstox</button><span class="session-divider"></span><label class="theme-picker" title="Choose website accent color"><span id="site-accent-swatch">●</span><span>Theme</span><input id="site-accent" type="color" value="#ff9f43" aria-label="Choose website accent color"></label></div></header>
