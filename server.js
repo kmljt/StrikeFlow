@@ -41,6 +41,7 @@ async function upstoxGet(url) {
   }
   return result.data?.data;
 }
+function hasUpstoxToken(){return Boolean(requestToken.getStore()||upstoxToken)}
 function upstoxURL(route, params={}) {
   const url=new URL(`https://api.upstox.com/v2${route}`);
   url.search=new URLSearchParams(params).toString();
@@ -91,7 +92,7 @@ function todayIST() {
 }
 async function routeRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  if (url.pathname === '/api/upstox/config' && req.method === 'GET') return send(res,200,{connected:Boolean(requestToken.getStore()||upstoxToken)});
+  if (url.pathname === '/api/upstox/config' && req.method === 'GET') return send(res,200,{connected:hasUpstoxToken()});
   if (url.pathname === '/api/upstox/config' && req.method === 'POST') {
     try {
       const input = await bodyJson(req), token=String(input.accessToken||'').trim();
@@ -103,7 +104,7 @@ async function routeRequest(req, res) {
   }
   if (url.pathname === '/api/upstox/config' && req.method === 'DELETE') {upstoxToken=null;suggestionCache.clear();try{fs.unlinkSync(tokenFile)}catch(e){if(e.code!=='ENOENT')return send(res,500,{error:'Could not remove the saved token.'})}return send(res,200,{connected:false});}
   if (url.pathname === '/api/upstox/nifty-expiries') {
-    if (!upstoxToken) return send(res,401,{error:'Connect Upstox first to load NIFTY 50 expiries.'});
+    if (!hasUpstoxToken()) return send(res,401,{error:'Connect Upstox first to load NIFTY 50 expiries.'});
     try {
       const active=await upstoxGet(upstoxURL('/option/contract',{instrument_key:'NSE_INDEX|Nifty 50'}))||[];
       let expired=[],expiredAvailable=true;
@@ -114,7 +115,7 @@ async function routeRequest(req, res) {
     } catch(e) {return send(res,502,{error:e.message});}
   }
   if (url.pathname === '/api/upstox/nifty-options') {
-    if (!upstoxToken) return send(res,401,{error:'Connect Upstox first to search NIFTY 50 options.'});
+    if (!hasUpstoxToken()) return send(res,401,{error:'Connect Upstox first to search NIFTY 50 options.'});
     const expiry=url.searchParams.get('expiry');
     if(!/^\d{4}-\d{2}-\d{2}$/.test(expiry||''))return send(res,400,{error:'Choose a valid NIFTY 50 expiry date.'});
     try {
@@ -124,28 +125,28 @@ async function routeRequest(req, res) {
     } catch(e) {return send(res,502,{error:e.message});}
   }
   if (url.pathname === '/api/upstox/nifty-suggestions') {
-    if (!upstoxToken) return send(res,401,{error:'Connect Upstox first to find option premiums.'});
+    if (!hasUpstoxToken()) return send(res,401,{error:'Connect Upstox first to find option premiums.'});
     const expiry=url.searchParams.get('expiry'),day=url.searchParams.get('day'),suffix=Number(url.searchParams.get('suffix')),type=url.searchParams.get('type');
     if(!/^\d{4}-\d{2}-\d{2}$/.test(expiry||'')||!/^\d{4}-\d{2}-\d{2}$/.test(day||'')||!Number.isInteger(suffix)||suffix<0||suffix>999||!['CE','PE'].includes(type||''))return send(res,400,{error:'Enter a valid expiry, trading day, and strike suffix.'});
     try{return send(res,200,await suggestOptions(expiry,day,suffix,type));}
     catch(e){return send(res,502,{error:e.message});}
   }
   if (url.pathname === '/api/upstox/nifty-contract') {
-    if (!upstoxToken) return send(res,401,{error:'Connect Upstox first to load NIFTY 50 option prices.'});
+    if (!hasUpstoxToken()) return send(res,401,{error:'Connect Upstox first to load NIFTY 50 option prices.'});
     const expiry=url.searchParams.get('expiry'),strike=Number(url.searchParams.get('strike')),type=url.searchParams.get('type');
     if(!/^\d{4}-\d{2}-\d{2}$/.test(expiry||'')||!Number.isInteger(strike)||strike<1||!['CE','PE'].includes(type||''))return send(res,400,{error:'Enter a valid expiry date, strike, and CE/PE type.'});
     try{return send(res,200,await resolveNiftyOption(expiry,strike,type));}
     catch(e){return send(res,502,{error:e.message});}
   }
   if (url.pathname === '/api/upstox/history') {
-    if (!upstoxToken) return send(res,401,{error:'Connect Upstox first to load option prices.'});
+    if (!hasUpstoxToken()) return send(res,401,{error:'Connect Upstox first to load option prices.'});
     const instrumentKey=url.searchParams.get('instrumentKey'),from=url.searchParams.get('from'),to=url.searchParams.get('to'),interval=url.searchParams.get('interval'),expired=url.searchParams.get('expired')==='true';
     if (!instrumentKey||!instrumentKey.startsWith('NSE_FO|')||instrumentKey.length>160||!/^[\w| -]+$/.test(instrumentKey)||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(from||'')||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(to||'')||!['1minute','5minute','15minute','30minute','day'].includes(interval||'')) return send(res,400,{error:'Invalid option history request.'});
     try {return send(res,200,await upstoxHistory(instrumentKey,from,to,interval,expired));}
     catch(e) {return send(res,502,{error:e.message});}
   }
   if (url.pathname === '/api/upstox/nifty-index-history') {
-    if (!upstoxToken) return send(res,401,{error:'Connect Upstox first to load NIFTY 50 prices.'});
+    if (!hasUpstoxToken()) return send(res,401,{error:'Connect Upstox first to load NIFTY 50 prices.'});
     const day=url.searchParams.get('day'),interval=url.searchParams.get('interval');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day||'')||!['1minute','5minute','15minute','30minute'].includes(interval||'')) return send(res,400,{error:'Invalid NIFTY 50 chart request.'});
     try {const [history,previous]=await Promise.all([upstoxHistory('NSE_INDEX|Nifty 50',day,addCalendarDays(day,1),interval,false),priorClose('NSE_INDEX|Nifty 50',day)]);return send(res,200,{...history,previousClose:previous?.close??null});}
