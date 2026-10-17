@@ -2,11 +2,13 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const https = require('node:https');
+const { AsyncLocalStorage } = require('node:async_hooks');
 
 const root = __dirname;
 const port = Number(process.env.PORT || 4173);
 const tokenFile = path.join(root, '.upstox-token');
 let upstoxToken = fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, 'utf8').trim() : null;
+const requestToken = new AsyncLocalStorage();
 const suggestionCache = new Map();
 
 function send(res, status, body) {
@@ -14,6 +16,7 @@ function send(res, status, body) {
   res.end(JSON.stringify(body));
 }
 function bodyJson(req) {
+  if(req.body!==undefined){try{return Promise.resolve(typeof req.body==='string'?JSON.parse(req.body||'{}'):req.body||{})}catch{return Promise.reject(new Error('Invalid JSON'))}}
   return new Promise((resolve, reject) => {
     let raw=''; req.on('data', chunk => {raw += chunk; if(raw.length > 10000) reject(new Error('Request too large'));});
     req.on('end', () => {try {resolve(JSON.parse(raw || '{}'));} catch {reject(new Error('Invalid JSON'));}});
@@ -28,7 +31,9 @@ function getJson(url, headers={}) {
   });
 }
 async function upstoxGet(url) {
-  const result=await getJson(url,{Authorization:`Bearer ${upstoxToken}`,'Accept':'application/json','User-Agent':'PnlTracker/1.0'});
+  const token=requestToken.getStore()||upstoxToken;
+  if(!token)throw new Error('Connect Upstox first to load market data.');
+  const result=await getJson(url,{Authorization:`Bearer ${token}`,'Accept':'application/json','User-Agent':'StrikeFlow/1.0'});
   if(result.status>=400 || result.data?.status==='error') {
     const code=result.data?.errors?.[0]?.errorCode;
     if(code==='UDAPI1149') throw new Error('Upstox requires its Plus plan for expired option history. Choose an active expiry or enable Plus.');
@@ -84,17 +89,17 @@ function todayIST() {
   const parts=new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:'Asia/Kolkata'}).formatToParts(new Date());
   return `${parts.find(x=>x.type==='year').value}-${parts.find(x=>x.type==='month').value}-${parts.find(x=>x.type==='day').value}`;
 }
-const server = http.createServer(async (req, res) => {
+async function routeRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  if (url.pathname === '/api/upstox/config' && req.method === 'GET') return send(res,200,{connected:Boolean(upstoxToken)});
+  if (url.pathname === '/api/upstox/config' && req.method === 'GET') return send(res,200,{connected:Boolean(requestToken.getStore()||upstoxToken)});
   if (url.pathname === '/api/upstox/config' && req.method === 'POST') {
     try {
       const input = await bodyJson(req), token=String(input.accessToken||'').trim();
       if (!token || token.length>4000) return send(res,400,{error:'Enter your Upstox access token.'});
-      fs.writeFileSync(tokenFile,token,{encoding:'utf8',mode:0o600});
-      fs.chmodSync(tokenFile,0o600);
-      upstoxToken=token;suggestionCache.clear(); return send(res,200,{connected:true});
-    } catch(e) {return send(res,400,{error:e.message});}
+      await requestToken.run(token,async()=>upstoxGet(upstoxURL('/option/contract',{instrument_key:'NSE_INDEX|Nifty 50'})));
+      if(!process.env.VERCEL){fs.writeFileSync(tokenFile,token,{encoding:'utf8',mode:0o600});fs.chmodSync(tokenFile,0o600);upstoxToken=token;}
+      suggestionCache.clear(); return send(res,200,{connected:true});
+    } catch(e) {return send(res,401,{error:e.message||'Could not connect to Upstox. Check the token and try again.'});}
   }
   if (url.pathname === '/api/upstox/config' && req.method === 'DELETE') {upstoxToken=null;suggestionCache.clear();try{fs.unlinkSync(tokenFile)}catch(e){if(e.code!=='ENOENT')return send(res,500,{error:'Could not remove the saved token.'})}return send(res,200,{connected:false});}
   if (url.pathname === '/api/upstox/nifty-expiries') {
@@ -158,5 +163,11 @@ const server = http.createServer(async (req, res) => {
   if(!file.startsWith(root)||!fs.existsSync(file)||!fs.statSync(file).isFile()){res.writeHead(404);return res.end('Not found');}
   const types={'.html':'text/html; charset=utf-8','.css':'text/css','.js':'text/javascript'};
   res.writeHead(200,{'content-type':types[path.extname(file)]||'text/plain'});fs.createReadStream(file).pipe(res);
-});
-server.listen(port,'127.0.0.1',()=>console.log(`StrikeFlow ready at http://localhost:${port}`));
+}
+function handler(req,res){
+  const auth=String(req.headers.authorization||''),match=auth.match(/^Bearer\s+(.+)$/i),token=match?.[1]?.trim();
+  return requestToken.run(token||upstoxToken,()=>routeRequest(req,res));
+}
+const server = http.createServer(handler);
+if(require.main===module)server.listen(port,'0.0.0.0',()=>console.log(`StrikeFlow ready at http://localhost:${port}`));
+module.exports={handler};
