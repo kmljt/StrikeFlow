@@ -178,7 +178,7 @@ $("option-dialog-form").addEventListener("submit", (e) => {
 document.querySelectorAll("[data-option-mode]").forEach((button) =>
   button.addEventListener("click", () => setOptionMode(button.dataset.optionMode)),
 );
-$("smart-add").addEventListener("click", addSmartPosition);
+$("smart-add").addEventListener("click", () => addSmartPosition());
 $("option-search").addEventListener("input", updateOptionSuggestions);
 $("option-search").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && window.optionEntryMode === "manual") {
@@ -971,7 +971,12 @@ async function findSmartOption() {
       result = await response.json();
     if (requestId !== smartPickRequest) return;
     if (!response.ok) throw Error(result.error || "Could not find an option.");
-    window.smartPickResult = { ...result, expiry };
+    error.hidden = true;
+    window.smartPickResult = {
+      ...result,
+      expiry,
+      alternatives: (result.alternatives || []).map((option) => ({ ...option, expiry })),
+    };
     const budgetDifference = result.remainingBudget >= 0
       ? `${formatSmartMoney(result.remainingBudget)} under ${formatSmartMoney(result.budget)}`
       : `${formatSmartMoney(-result.remainingBudget)} over ${formatSmartMoney(result.budget)}`;
@@ -1069,10 +1074,26 @@ $("smart-type").addEventListener("change", scheduleSmartPick);
 $("expiry").addEventListener("change", scheduleSmartPick);
 dateField.addEventListener("change", scheduleSmartPick);
 function addSmartPosition(suggestion = window.smartPickResult) {
+  if (suggestion instanceof Event) suggestion = window.smartPickResult;
   if (!suggestion) return;
-  $("option-search").value = `${suggestion.strike} ${suggestion.type}`;
-  $("lots").value = String(suggestion.lots);
-  addPosition();
+  const position = {
+    expiry: suggestion.expiry || window.smartPickResult?.expiry || $("expiry").value,
+    strike: Number(suggestion.strike),
+    optionType: String(suggestion.type || "").toUpperCase(),
+    lots: Number(suggestion.lots),
+  };
+  if (
+    !position.expiry ||
+    position.expiry < dateField.value ||
+    !Number.isInteger(position.strike) ||
+    !["CE", "PE"].includes(position.optionType) ||
+    !Number.isInteger(position.lots) ||
+    position.lots < 1
+  ) {
+    showError("This smart pick is no longer valid. Refresh it and try again.");
+    return;
+  }
+  addPosition(position);
 }
 $("smart-alternative-list").addEventListener("click", (event) => {
   const button = event.target.closest("[data-alternative-index]");
@@ -1266,7 +1287,10 @@ async function checkUpstox() {
     window.upstoxConnected = true;
     updateUpstoxStatus("Loading expiries…");
     const loaded = await loadExpiries();
-    if (loaded) scheduleRefresh();
+    if (loaded) {
+      updateUpstoxStatus();
+      scheduleRefresh();
+    }
     else {
       window.upstoxConnected = false;
       updateUpstoxStatus();
@@ -1429,8 +1453,8 @@ function formPosition() {
     return showError("Enter a whole-number lot count of at least 1.");
   return { expiry, strike: Number(m[1]), optionType: m[2].toUpperCase(), lots };
 }
-function addPosition() {
-  const p = formPosition(),
+function addPosition(position = null) {
+  const p = position || formPosition(),
     basket = state.baskets.find((b) => b.id === window.targetBasketId);
   if (!p || !basket) return;
   invalidateResults();
@@ -1754,12 +1778,16 @@ async function loadTrade(generation = ++requestGeneration) {
       (b) => b.enabled !== false && b.items.some((p) => p.enabled !== false),
     ),
     chartBaskets = statBaskets;
-  if (!day || !statBaskets.length) {
+  if (!day) {
     $("output").hidden = true;
     window.chartData = null;
     window.miniChartData = null;
     window.basketPnlResults = {};
     renderBaskets();
+    return;
+  }
+  if (!statBaskets.length) {
+    await loadNiftyOnly(day, $("interval").value, generation);
     return;
   }
   if (
@@ -1922,6 +1950,52 @@ async function loadTrade(generation = ++requestGeneration) {
       $("output").hidden = true;
       showError(e.message || "Could not load prices.");
     }
+  }
+}
+async function loadNiftyOnly(day, interval, generation) {
+  $("error").hidden = true;
+  $("output").hidden = false;
+  $("output").classList.add("loading");
+  $("chart-tooltip").hidden = true;
+  $("percent-tooltip").hidden = true;
+  $("empty").textContent = "Add a basket to see P&L comparisons.";
+  $("empty").hidden = false;
+  $("basket-legend").replaceChildren();
+  $("percent-legend").replaceChildren();
+  const chart = $("chart"),
+    percentChart = $("percent-chart");
+  chart.getContext("2d").clearRect(0, 0, chart.width, chart.height);
+  percentChart.getContext("2d").clearRect(0, 0, percentChart.width, percentChart.height);
+  window.chartData = null;
+  window.miniChartData = null;
+  window.basketPnlResults = {};
+  renderBaskets();
+  try {
+    const index = await loadNiftyIndex(day, interval).then(
+      (points) => ({ points }),
+      (error) => ({ error: error.message }),
+    );
+    if (generation !== requestGeneration) return;
+    const times = (index.points || []).map((point) => point.t),
+      xRange = times.length
+        ? { start: times[0], end: times.at(-1) }
+        : { start: 0, end: 0 };
+    window.chartXRange = xRange;
+    $("title").textContent = "Options P&L";
+    $("dates").textContent = formatDate(day);
+    $("chart-range").textContent = times.length
+      ? `${time(times[0])} – ${time(times.at(-1))} IST · ${interval.replace("minute", "-minute")}`
+      : "NIFTY 50 data unavailable";
+    $("output").classList.remove("loading");
+    window.miniChartData = {
+      index,
+      percent: { times, series: [] },
+      xRange,
+    };
+    drawMiniPlots(window.miniChartData);
+  } finally {
+    if (generation === requestGeneration)
+      $("output").classList.remove("loading");
   }
 }
 function renderLegend(data) {

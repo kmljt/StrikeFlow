@@ -47,10 +47,9 @@ function bodyJson(req) {
     });
   });
 }
-function getJson(url, headers = {}) {
+function getJson(url, headers = {}, timeoutMs = 12000) {
   return new Promise((resolve, reject) => {
-    https
-      .get(url, { headers }, (upstream) => {
+    const request = https.get(url, { headers }, (upstream) => {
         let body = "";
         upstream.setEncoding("utf8");
         upstream.on("data", (part) => (body += part));
@@ -66,20 +65,31 @@ function getJson(url, headers = {}) {
             );
           }
         });
-      })
-      .on("error", () =>
-        reject(new Error("Could not connect to the data provider.")),
-      );
+      });
+    request.setTimeout(timeoutMs, () =>
+      request.destroy(new Error("Upstox did not respond in time. Try again shortly.")),
+    );
+    request.on("error", (error) =>
+      reject(
+        error.message.includes("did not respond in time")
+          ? error
+          : new Error("Could not connect to the data provider."),
+      ),
+    );
   });
 }
-async function upstoxGet(url) {
+async function upstoxGet(url, timeoutMs = 12000) {
   const token = requestToken.getStore() || upstoxToken;
   if (!token) throw new Error("Connect Upstox first to load market data.");
-  const result = await getJson(url, {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/json",
-    "User-Agent": "StrikeFlow/1.0",
-  });
+  const result = await getJson(
+    url,
+    {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "User-Agent": "StrikeFlow/1.0",
+    },
+    timeoutMs,
+  );
   if (result.status >= 400 || result.data?.status === "error") {
     const code = result.data?.errors?.[0]?.errorCode;
     if (code === "UDAPI1149")
@@ -368,10 +378,10 @@ async function routeRequest(req, res) {
             upstoxURL("/expired-instruments/expiries", {
               instrument_key: "NSE_INDEX|Nifty 50",
             }),
+          5000,
           )) || [];
-      } catch (e) {
-        if (e.message.includes("Plus plan")) expiredAvailable = false;
-        else throw e;
+      } catch {
+        expiredAvailable = false;
       }
       const dates = [
         ...new Set(
