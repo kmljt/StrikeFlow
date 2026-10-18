@@ -220,36 +220,37 @@ async function smartPickOption(expiry, day, otmPoints, budget, type) {
     type === "CE"
       ? reference.close + otmPoints
       : reference.close - otmPoints;
-  const targetStrike =
-    type === "CE"
-      ? Math.ceil(rawTarget / step) * step
-      : Math.floor(rawTarget / step) * step;
+  const targetStrike = Math.round(rawTarget / step) * step;
   const candidates = contracts
     .filter((contract) => {
       const strike = Number(contract.strike_price);
-      return (
-        contract.instrument_type === type &&
-        Number.isFinite(strike) &&
-        (type === "CE" ? strike >= targetStrike : strike <= targetStrike)
-      );
+      if (contract.instrument_type !== type || !Number.isFinite(strike))
+        return false;
+      const actualOTM =
+        type === "CE" ? strike - reference.close : reference.close - strike;
+      return actualOTM >= otmPoints - 100 &&
+        actualOTM <= otmPoints + 100;
     })
     .sort((a, b) =>
-      type === "CE"
-        ? Number(a.strike_price) - Number(b.strike_price)
-        : Number(b.strike_price) - Number(a.strike_price),
-    )
-    .slice(0, 12);
+      Math.abs(Number(a.strike_price) - targetStrike) -
+      Math.abs(Number(b.strike_price) - targetStrike),
+    );
 
   const expired = expiry < todayIST();
-  for (const contract of candidates) {
-    const premium = await priorClose(contract.instrument_key, day, expired);
+  const pricedCandidates = await Promise.all(
+    candidates.map(async (contract) => ({
+      contract,
+      premium: await priorClose(contract.instrument_key, day, expired),
+    })),
+  );
+  const choices = [];
+  for (const { contract, premium } of pricedCandidates) {
     if (!premium || premium.close <= 0) continue;
     const costPerLot = premium.close * 65;
-    const lots = Math.floor(budget / costPerLot);
-    if (lots < 1) continue;
+    const lots = Math.max(1, Math.round(budget / costPerLot));
     const strike = Number(contract.strike_price);
     const estimatedCost = costPerLot * lots;
-    const value = {
+    choices.push({
       type,
       strike,
       lots,
@@ -267,8 +268,23 @@ async function smartPickOption(expiry, day, otmPoints, budget, type) {
       budget,
       estimatedCost,
       remainingBudget: budget - estimatedCost,
-      adjustedForBudget: strike !== targetStrike,
-    };
+      budgetGap: Math.abs(budget - estimatedCost),
+      otmGap: Math.abs(
+        (type === "CE" ? strike - reference.close : reference.close - strike) -
+          otmPoints,
+      ),
+    });
+  }
+
+  if (choices.length) {
+    const ranked = [...choices].sort(
+      (a, b) => a.budgetGap - b.budgetGap || a.otmGap - b.otmGap,
+    );
+    const [preferred, ...otherChoices] = ranked;
+    const serializeChoice = ({ budgetGap, otmGap, ...choice }) => choice;
+    const value = serializeChoice(preferred);
+    value.alternatives = otherChoices.slice(0, 4).map(serializeChoice);
+    value.adjustedForBudget = value.strike !== targetStrike;
     suggestionCache.set(cacheKey, {
       value,
       expires: Date.now() + 120000,
@@ -277,7 +293,7 @@ async function smartPickOption(expiry, day, otmPoints, budget, type) {
   }
 
   throw new Error(
-    "No listed OTM option near your target had a previous close that fits this budget. Try a larger budget or OTM distance.",
+    "No option prices were available within 100 points of your OTM target. Try another expiry or trading day.",
   );
 }
 function todayIST() {
@@ -436,7 +452,7 @@ async function routeRequest(req, res) {
       !/^\d{4}-\d{2}-\d{2}$/.test(day || "") ||
       expiry < day ||
       !Number.isInteger(otmPoints) ||
-      otmPoints < 1 ||
+      otmPoints < -10000 ||
       otmPoints > 10000 ||
       !Number.isFinite(budget) ||
       budget < 1 ||
@@ -447,10 +463,11 @@ async function routeRequest(req, res) {
         error: "Enter a valid expiry, trading day, OTM distance, option type, and budget.",
       });
     try {
+      const normalizedOTM = Math.max(-10000, Math.min(10000, Math.round(otmPoints / 50) * 50));
       return send(
         res,
         200,
-        await smartPickOption(expiry, day, otmPoints, budget, type),
+        await smartPickOption(expiry, day, normalizedOTM, budget, type),
       );
     } catch (e) {
       return send(res, 502, { error: e.message });

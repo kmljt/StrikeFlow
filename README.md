@@ -8,7 +8,7 @@ It uses market data from Upstox. StrikeFlow does not place orders, connect to a 
 
 - Create multiple independent option baskets and give them custom names and bright accent colors.
 - Add NIFTY 50 call and put positions, edit lot counts, and remove positions or baskets.
-- Pick options manually or use **Smart pick** to choose an OTM distance and budget and get a contract and affordable lot count from previous-session closes.
+- Pick options manually or use **Smart pick** to choose an OTM distance and approximate budget and get a contract and lot-count estimate from previous-session closes.
 - Compare selected baskets on synchronized NIFTY 50, basket P&L, and percentage-change charts.
 - Hover any chart to inspect the same time across the other charts.
 - See per-basket cost, current value, percentage change, max profit, max loss, drawdown, and profit kept.
@@ -62,14 +62,14 @@ The lot multiplier is currently 65. The displayed value follows the selected pri
 
 ### Smart pick
 
-In **Add Option**, choose **Smart pick**, select CE or PE, enter an OTM distance in NIFTY points, and enter a premium budget. StrikeFlow reads the previous-session NIFTY close, rounds the target outward to a 50-point strike, and checks the previous-session closes of the nearest listed OTM strikes. It suggests the nearest strike with at least one whole lot inside the budget. If the target strike does not fit, it searches farther OTM among the nearby listed strikes for a fit. The suggested lot count is the largest whole number affordable at that reference premium:
+In **Add Option**, choose **Smart pick**, select CE or PE, enter a strike offset in NIFTY points, and enter an approximate premium budget. Positive offsets target OTM strikes, zero targets ATM, and negative offsets target ITM strikes. Offsets snap to the nearest 50-point increment, and suggestions refresh automatically when the inputs change. StrikeFlow reads the previous-session NIFTY close, rounds the target to the nearest 50-point strike, and compares listed contracts within 100 points either side of the requested offset. For each contract it estimates the nearest whole-lot quantity to the budget, then ranks choices by how closely the estimated total matches the budget; distance from the requested offset breaks ties. The best fit and up to four alternatives are shown:
 
 ```text
 estimated debit = previous-session option close × lots × 65
-lots            = floor(budget ÷ (previous-session option close × 65))
+lots            = nearest whole-lot quantity to the requested premium budget
 ```
 
-The estimate uses historical closes for the selected trading day; the live price may differ. Smart pick does not check liquidity, spreads, or execution prices, and does not submit an order. If no nearby OTM contract has a previous close within the budget, increase the budget or OTM distance and search again.
+The estimate uses historical closes for the selected trading day; the live price may differ. Since lot size is indivisible, the estimate may be over budget; the UI shows the overage in red and remaining budget in green. Smart pick does not check liquidity, spreads, or execution prices, and does not submit an order. If no nearby option prices are available, try another expiry or trading day.
 
 ### Scenario P&L
 

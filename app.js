@@ -166,6 +166,7 @@ window.scenarioChartRefs = [];
 window.optionEntryMode = "manual";
 window.smartPickResult = null;
 let smartPickRequest = 0;
+let smartPickDebounce = null;
 $("new-basket").addEventListener("click", addBasket);
 $("basket-dialog").addEventListener("close", finishBasketDialog);
 $("option-cancel").addEventListener("click", () => $("option-dialog").close());
@@ -878,6 +879,8 @@ function openOptionDialog(id, index = null) {
   $("option-search").focus();
 }
 function setOptionMode(mode) {
+  clearTimeout(smartPickDebounce);
+  smartPickRequest++;
   window.optionEntryMode = mode === "smart" ? "smart" : "manual";
   $("manual-option-fields").hidden = window.optionEntryMode === "smart";
   $("smart-option-fields").hidden = window.optionEntryMode !== "smart";
@@ -890,10 +893,11 @@ function setOptionMode(mode) {
   $("option-error").hidden = true;
   $("option-submit").textContent =
     window.optionEntryMode === "smart"
-      ? "Find smart pick"
+      ? "Refresh pick"
       : window.editPositionIndex === null || window.editPositionIndex === undefined
         ? "Add option"
         : "Save changes";
+  if (window.optionEntryMode === "smart") scheduleSmartPick();
 }
 function formatSmartMoney(value) {
   return `₹${Number(value).toLocaleString("en-IN", {
@@ -908,11 +912,27 @@ function formatSmartDate(day) {
     timeZone: "UTC",
   }).format(new Date(`${day}T00:00:00Z`));
 }
+function normalizeSmartOffset(value) {
+  if (!Number.isFinite(value)) return null;
+  return Math.max(-10000, Math.min(10000, Math.round(value / 50) * 50));
+}
+function formatMoneyness(points) {
+  const distance = Math.abs(points);
+  const state = points < 0 ? "ITM" : points > 0 ? "OTM" : "ATM";
+  return `${distance} ${state}`;
+}
 async function findSmartOption() {
+  clearTimeout(smartPickDebounce);
+  smartPickDebounce = null;
+  const otmInput = $("smart-otm-points");
+  const enteredOffset = Number(otmInput.value);
+  if (otmInput.value.trim() !== "" && Number.isFinite(enteredOffset)) {
+    otmInput.value = String(normalizeSmartOffset(enteredOffset));
+  }
   const expiry = $("expiry").value,
     day = dateField.value,
     type = $("smart-type").value,
-    otmPoints = Number($("smart-otm-points").value),
+    otmPoints = Number(otmInput.value),
     budget = Number($("smart-budget").value),
     submit = $("option-submit"),
     error = $("option-error");
@@ -922,12 +942,14 @@ async function findSmartOption() {
     return;
   }
   if (
+    otmInput.value.trim() === "" ||
     !Number.isInteger(otmPoints) ||
-    otmPoints < 1 ||
+    otmPoints < -10000 ||
+    otmPoints > 10000 ||
     !Number.isFinite(budget) ||
     budget < 1
   ) {
-    error.textContent = "Enter a positive OTM distance and premium budget.";
+    error.textContent = "Enter a strike offset from −10,000 to 10,000 points and a premium budget.";
     error.hidden = false;
     return;
   }
@@ -950,13 +972,51 @@ async function findSmartOption() {
     if (requestId !== smartPickRequest) return;
     if (!response.ok) throw Error(result.error || "Could not find an option.");
     window.smartPickResult = { ...result, expiry };
-    const shifted = result.adjustedForBudget
-      ? `The target strike was over budget, so this is the next OTM strike that fits. `
-      : "This is the nearest listed strike at or beyond your OTM target. ";
+    const budgetDifference = result.remainingBudget >= 0
+      ? `${formatSmartMoney(result.remainingBudget)} under ${formatSmartMoney(result.budget)}`
+      : `${formatSmartMoney(-result.remainingBudget)} over ${formatSmartMoney(result.budget)}`;
     $("smart-result-title").textContent = `${result.strike} ${result.type} · ${result.lots} lot${result.lots === 1 ? "" : "s"}`;
-    $("smart-result-details").textContent =
-      `${shifted}NIFTY prior close ${formatSmartMoney(result.underlyingClose)} (${formatSmartDate(result.underlyingDate)}); ${result.actualOTM} points OTM. Option prior close ${formatSmartMoney(result.premiumClose)} (${formatSmartDate(result.premiumDate)}) × ${result.lots * 65} units = ${formatSmartMoney(result.estimatedCost)}, with ${formatSmartMoney(result.remainingBudget)} left.`;
+    const detailRows = [
+      ["Strike", `${formatMoneyness(result.requestedOTM)} target · ${formatMoneyness(result.actualOTM)} actual`],
+      ["NIFTY", `${formatSmartMoney(result.underlyingClose)} · ${formatSmartDate(result.underlyingDate)}`],
+      ["Option", `${formatSmartMoney(result.premiumClose)} × 65 = ${formatSmartMoney(result.premiumClose * 65)}/lot`],
+      ["Budget", budgetDifference, result.remainingBudget >= 0 ? "smart-profit" : "smart-loss"],
+    ];
+    $("smart-result-details").replaceChildren(...detailRows.map(([label, value, tone]) => {
+      const row = document.createElement("div");
+      row.className = "smart-result-row";
+      const name = document.createElement("span");
+      name.textContent = label;
+      const detail = document.createElement("span");
+      detail.textContent = value;
+      if (tone) detail.classList.add(tone);
+      row.append(name, detail);
+      return row;
+    }));
     $("smart-add").textContent = `Add ${result.lots} lot${result.lots === 1 ? "" : "s"} · ${formatSmartMoney(result.estimatedCost)}`;
+    const alternativeList = $("smart-alternative-list");
+    alternativeList.replaceChildren(...(result.alternatives || []).map((option, index) => {
+      const row = document.createElement("div");
+      row.className = "smart-alternative-row";
+      const copy = document.createElement("div");
+      copy.className = "smart-alternative-copy";
+      const title = document.createElement("strong");
+      title.textContent = `${option.strike} ${option.type} · ${option.lots} lot${option.lots === 1 ? "" : "s"}`;
+      const detail = document.createElement("span");
+      detail.textContent = `${formatMoneyness(option.actualOTM)} · ${formatSmartMoney(option.premiumClose * 65)}/lot · ${formatSmartMoney(option.estimatedCost)} total`;
+      const budget = document.createElement("span");
+      budget.className = option.remainingBudget >= 0 ? "smart-profit" : "smart-loss";
+      budget.textContent = `${formatSmartMoney(Math.abs(option.remainingBudget))} ${option.remainingBudget >= 0 ? "under" : "over"} budget`;
+      copy.append(title, detail, budget);
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "smart-alternative-add";
+      add.dataset.alternativeIndex = String(index);
+      add.textContent = "Add";
+      row.append(copy, add);
+      return row;
+    }));
+    $("smart-alternatives").hidden = alternativeList.childElementCount === 0;
     $("smart-result").hidden = false;
   } catch (e) {
     if (requestId !== smartPickRequest) return;
@@ -965,17 +1025,62 @@ async function findSmartOption() {
   } finally {
     if (requestId === smartPickRequest) {
       submit.disabled = false;
-      submit.textContent = "Find smart pick";
+      submit.textContent = "Refresh pick";
     }
   }
 }
-function addSmartPosition() {
-  const suggestion = window.smartPickResult;
+$("smart-otm-points").addEventListener("change", (event) => {
+  const input = event.currentTarget;
+  const value = Number(input.value);
+  if (input.value.trim() === "" || !Number.isFinite(value)) return;
+  input.value = String(normalizeSmartOffset(value));
+});
+function scheduleSmartPick() {
+  clearTimeout(smartPickDebounce);
+  smartPickRequest++;
+  window.smartPickResult = null;
+  $("smart-result").hidden = true;
+  $("option-error").hidden = true;
+  if (window.optionEntryMode === "smart") {
+    $("option-submit").disabled = false;
+    $("option-submit").textContent = "Refresh pick";
+  }
+  if (window.optionEntryMode !== "smart") return;
+  const expiry = $("expiry").value;
+  const day = dateField.value;
+  const otmPoints = Number($("smart-otm-points").value);
+  const budget = Number($("smart-budget").value);
+  if (
+    !expiry ||
+    expiry < day ||
+    $("smart-otm-points").value.trim() === "" ||
+    !Number.isFinite(otmPoints) ||
+    otmPoints < -10000 ||
+    otmPoints > 10000 ||
+    !Number.isFinite(budget) ||
+    budget < 1
+  ) return;
+  smartPickDebounce = setTimeout(() => findSmartOption(), 400);
+}
+$("smart-otm-points").addEventListener("input", scheduleSmartPick);
+$("smart-otm-points").addEventListener("change", scheduleSmartPick);
+$("smart-budget").addEventListener("input", scheduleSmartPick);
+$("smart-type").addEventListener("change", scheduleSmartPick);
+$("expiry").addEventListener("change", scheduleSmartPick);
+dateField.addEventListener("change", scheduleSmartPick);
+function addSmartPosition(suggestion = window.smartPickResult) {
   if (!suggestion) return;
   $("option-search").value = `${suggestion.strike} ${suggestion.type}`;
   $("lots").value = String(suggestion.lots);
   addPosition();
 }
+$("smart-alternative-list").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-alternative-index]");
+  if (!button) return;
+  const index = Number(button.dataset.alternativeIndex);
+  const option = window.smartPickResult?.alternatives?.[index];
+  if (option) addSmartPosition(option);
+});
 function epoch(day) {
   return Math.floor(new Date(`${day}T00:00:00Z`).getTime() / 1000);
 }

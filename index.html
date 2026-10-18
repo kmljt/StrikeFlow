@@ -2998,26 +2998,53 @@
       }
     </style>
     <style id="smart-option-picker">
+      #option-dialog{width:min(640px,calc(100% - 32px))}
       #option-dialog form{gap:14px}
       #option-mode-tabs{display:flex;gap:4px;padding:4px;border:1px solid #25282c;border-radius:11px;background:#050607}
       #option-mode-tabs[hidden],#manual-option-fields[hidden],#smart-option-fields[hidden]{display:none!important}
       #option-mode-tabs button{flex:1;min-height:34px;border:1px solid transparent;border-radius:8px;background:transparent;color:#92999f;font:650 12px system-ui;cursor:pointer;transition:color .16s ease,background .16s ease,border-color .16s ease}
       #option-mode-tabs button[aria-pressed="true"]{background:color-mix(in srgb,var(--site-accent) 12%,#111214);border-color:color-mix(in srgb,var(--site-accent) 28%,#24272b);color:var(--site-accent)}
-      .option-entry-fields{display:grid;gap:12px}
+      .option-entry-fields{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:12px}
+      #option-dialog form .option-entry-fields>.field,
+      #option-dialog form .smart-input-grid>.field{display:block;min-width:0;margin:0}
+      .option-entry-fields .field label{white-space:nowrap}
       .smart-option-fields>p{margin:0;color:#899198;font-size:12px;line-height:1.6}
-      .smart-input-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-      .smart-input-grid .field:last-child{grid-column:1/-1}
-      .smart-input-grid .field label{font-size:10px}
+      .smart-input-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+      .smart-input-grid .field label{font-size:10px;white-space:nowrap}
       .smart-input-grid input,.smart-input-grid select{height:42px}
-      .smart-result{padding:13px;border:1px solid color-mix(in srgb,var(--site-accent) 30%,#25282c);border-radius:11px;background:linear-gradient(135deg,color-mix(in srgb,var(--site-accent) 8%,#0a0b0c),#08090a 65%)}
+      .smart-result{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:22px;padding:16px 18px;border:1px solid color-mix(in srgb,var(--site-accent) 30%,#25282c);border-radius:11px;background:linear-gradient(135deg,color-mix(in srgb,var(--site-accent) 8%,#0a0b0c),#08090a 65%)}
       .smart-result[hidden]{display:none!important}
-      .smart-result-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+      .smart-result-main{display:grid;gap:12px;min-width:0}
+      .smart-result-heading{display:flex;align-items:center;min-width:0}
+      .smart-result-identity{display:flex;align-items:center;gap:12px;min-width:0}
       .smart-result-heading span{color:var(--site-accent);font-size:9px;font-weight:750;letter-spacing:.16em}
-      .smart-result-heading strong{font-size:16px;font-variant-numeric:tabular-nums}
-      .smart-result>p{margin:8px 0 12px;color:#a4abb1;font-size:11px;line-height:1.6}
-      .smart-result .button{width:100%;height:40px;background:var(--site-accent);color:#090a0b}
+      .smart-result-heading strong{min-width:0;font-size:16px;font-variant-numeric:tabular-nums;white-space:normal;word-break:normal}
+      .smart-result-details{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;width:100%;min-width:0}
+      .smart-result-row{display:grid;grid-template-columns:82px minmax(0,1fr);align-items:center;gap:12px;min-width:0;font-size:12px;line-height:1.4}
+      .smart-result-row span:first-child{color:#899198;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+      .smart-result-row span:last-child{color:#c1c7cc;font-size:12px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+      #option-dialog form .smart-result{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;align-items:center;gap:22px}
+      #option-dialog form .smart-result-main{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;width:100%;min-width:0}
+      #option-dialog form .smart-result-details{display:grid!important;grid-template-columns:minmax(0,1fr)!important;justify-content:initial;align-items:stretch;gap:8px;margin:0;width:100%}
+      #option-dialog form .smart-result-row{display:grid!important;grid-template-columns:82px minmax(0,1fr)!important;justify-content:initial;align-items:center;gap:12px;width:100%;min-width:0;margin:0}
+      #option-dialog form .smart-result-row .smart-profit{color:var(--green)}
+      #option-dialog form .smart-result-row .smart-loss{color:var(--red)}
+      .smart-result .button{width:auto!important;min-width:172px;height:44px;padding:0 16px;background:var(--site-accent);color:#090a0b;font-size:12px}
+      #option-dialog form .smart-alternatives{display:grid!important;grid-column:1/-1;grid-template-columns:minmax(0,1fr);justify-content:stretch;width:100%;box-sizing:border-box;gap:8px;margin:0;padding-top:12px;border-top:1px solid #25282c}
+      #option-dialog form .smart-alternatives[hidden]{display:none!important}
+      #option-dialog form #smart-alternative-list{display:grid!important;grid-template-columns:minmax(0,1fr);justify-content:stretch;width:100%;box-sizing:border-box;gap:0;margin:0}
+      .smart-alternatives-title{color:#899198;font-size:9px;font-weight:750;letter-spacing:.14em;text-transform:uppercase}
+      #option-dialog form .smart-alternative-row{display:grid!important;grid-template-columns:minmax(0,1fr) auto;justify-content:stretch;align-items:center;width:100%;box-sizing:border-box;gap:12px;margin:0;padding:8px 0;border-bottom:1px solid #1c1f22}
+      #option-dialog form .smart-alternative-row:last-child{border-bottom:0}
+      .smart-alternative-copy{display:grid;gap:3px;min-width:0}
+      .smart-alternative-copy strong{font-size:12px;font-variant-numeric:tabular-nums}
+      .smart-alternative-copy span{color:#92999f;font-size:10px;font-variant-numeric:tabular-nums;line-height:1.4}
+      .smart-alternative-add{min-height:32px;padding:0 11px;border:1px solid #34383d;border-radius:8px;background:#111316;color:#e9ecef;font:650 10px system-ui;cursor:pointer}
+      .smart-alternative-add:hover{border-color:var(--site-accent);color:var(--site-accent)}
+      .smart-alternative-copy .smart-profit{color:var(--green)}
+      .smart-alternative-copy .smart-loss{color:var(--red)}
       #option-submit{min-width:116px}
-      @media(max-width:520px){.smart-input-grid{grid-template-columns:1fr}.smart-input-grid .field:first-child{grid-column:auto}.smart-result-heading{align-items:flex-start;flex-direction:column;gap:4px}}
+      @media(max-width:520px){.option-entry-fields{grid-template-columns:minmax(0,1fr)}.smart-input-grid{grid-template-columns:1fr}.smart-result,#option-dialog form .smart-result{grid-template-columns:minmax(0,1fr)!important;gap:14px}.smart-result .button{width:100%!important;min-width:0}}
     </style>
   </head>
   <body>
@@ -3215,7 +3242,7 @@
         </form>
       </dialog>
       <dialog id="option-dialog">
-        <form id="option-dialog-form">
+        <form id="option-dialog-form" novalidate>
           <h2>
             <span id="option-dialog-title">Add option</span> to
             <span id="option-basket-name"></span>
@@ -3241,25 +3268,33 @@
             </div>
           </div>
           <section id="smart-option-fields" class="smart-option-fields" hidden>
-            <p>Choose how far out of the money you want to be and your approximate premium budget.</p>
+            <p>Choose your OTM distance and approximate budget.</p>
             <div class="smart-input-grid">
               <div class="field">
                 <label for="smart-type">Option type</label>
                 <select id="smart-type"><option value="CE">Call · CE</option><option value="PE">Put · PE</option></select>
               </div>
               <div class="field">
-                <label for="smart-otm-points">OTM distance · points</label>
-                <input id="smart-otm-points" type="number" min="1" max="10000" step="50" value="250" />
+                <label for="smart-otm-points">Strike offset · points</label>
+                <input id="smart-otm-points" type="number" min="-10000" max="10000" step="50" value="250" />
               </div>
               <div class="field">
                 <label for="smart-budget">Premium budget · ₹</label>
-                <input id="smart-budget" type="number" min="1" max="10000000" step="500" value="6000" />
+                <input id="smart-budget" type="number" min="0" max="10000000" step="100" value="6000" />
               </div>
             </div>
             <div id="smart-result" class="smart-result" hidden>
-              <div class="smart-result-heading"><span>BEST FIT</span><strong id="smart-result-title"></strong></div>
-              <p id="smart-result-details"></p>
+              <div class="smart-result-main">
+                <div class="smart-result-heading">
+                  <div class="smart-result-identity"><span>BEST FIT</span><strong id="smart-result-title"></strong></div>
+                </div>
+                <div id="smart-result-details" class="smart-result-details"></div>
+              </div>
               <button id="smart-add" class="button" type="button"></button>
+              <div id="smart-alternatives" class="smart-alternatives" hidden>
+                <div class="smart-alternatives-title">Other options</div>
+                <div id="smart-alternative-list"></div>
+              </div>
             </div>
           </section>
           <div id="option-error" class="error" hidden></div>
@@ -3284,6 +3319,6 @@
         >
       </div>
     </main>
-    <script src="app.js?v=smart-option-pick"></script>
+    <script src="app.js?v=smart-pick-alternatives"></script>
   </body>
 </html>
