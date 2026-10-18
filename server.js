@@ -201,6 +201,85 @@ async function suggestOptions(expiry, day, suffix, type) {
   suggestionCache.set(key, { value, expires: Date.now() + 120000 });
   return value;
 }
+async function smartPickOption(expiry, day, otmPoints, budget, type) {
+  const cacheKey = ["smart", expiry, day, otmPoints, budget, type].join("|");
+  const cached = suggestionCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.value;
+
+  const [reference, contracts] = await Promise.all([
+    priorClose("NSE_INDEX|Nifty 50", day),
+    niftyContracts(expiry),
+  ]);
+  if (!reference)
+    throw new Error(
+      "Could not find NIFTY 50’s previous-session close for that day.",
+    );
+
+  const step = 50;
+  const rawTarget =
+    type === "CE"
+      ? reference.close + otmPoints
+      : reference.close - otmPoints;
+  const targetStrike =
+    type === "CE"
+      ? Math.ceil(rawTarget / step) * step
+      : Math.floor(rawTarget / step) * step;
+  const candidates = contracts
+    .filter((contract) => {
+      const strike = Number(contract.strike_price);
+      return (
+        contract.instrument_type === type &&
+        Number.isFinite(strike) &&
+        (type === "CE" ? strike >= targetStrike : strike <= targetStrike)
+      );
+    })
+    .sort((a, b) =>
+      type === "CE"
+        ? Number(a.strike_price) - Number(b.strike_price)
+        : Number(b.strike_price) - Number(a.strike_price),
+    )
+    .slice(0, 12);
+
+  const expired = expiry < todayIST();
+  for (const contract of candidates) {
+    const premium = await priorClose(contract.instrument_key, day, expired);
+    if (!premium || premium.close <= 0) continue;
+    const costPerLot = premium.close * 65;
+    const lots = Math.floor(budget / costPerLot);
+    if (lots < 1) continue;
+    const strike = Number(contract.strike_price);
+    const estimatedCost = costPerLot * lots;
+    const value = {
+      type,
+      strike,
+      lots,
+      premiumClose: premium.close,
+      premiumDate: premium.date,
+      underlyingClose: reference.close,
+      underlyingDate: reference.date,
+      targetStrike,
+      requestedOTM: otmPoints,
+      actualOTM: Math.round(
+        type === "CE"
+          ? strike - reference.close
+          : reference.close - strike,
+      ),
+      budget,
+      estimatedCost,
+      remainingBudget: budget - estimatedCost,
+      adjustedForBudget: strike !== targetStrike,
+    };
+    suggestionCache.set(cacheKey, {
+      value,
+      expires: Date.now() + 120000,
+    });
+    return value;
+  }
+
+  throw new Error(
+    "No listed OTM option near your target had a previous close that fits this budget. Try a larger budget or OTM distance.",
+  );
+}
 function todayIST() {
   const parts = new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
@@ -338,6 +417,41 @@ async function routeRequest(req, res) {
       });
     try {
       return send(res, 200, await suggestOptions(expiry, day, suffix, type));
+    } catch (e) {
+      return send(res, 502, { error: e.message });
+    }
+  }
+  if (url.pathname === "/api/upstox/nifty-smart-pick") {
+    if (!hasUpstoxToken())
+      return send(res, 401, {
+        error: "Connect Upstox first to find a budget-fit option.",
+      });
+    const expiry = url.searchParams.get("expiry"),
+      day = url.searchParams.get("day"),
+      otmPoints = Number(url.searchParams.get("otmPoints")),
+      budget = Number(url.searchParams.get("budget")),
+      type = url.searchParams.get("type");
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(expiry || "") ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(day || "") ||
+      expiry < day ||
+      !Number.isInteger(otmPoints) ||
+      otmPoints < 1 ||
+      otmPoints > 10000 ||
+      !Number.isFinite(budget) ||
+      budget < 1 ||
+      budget > 10000000 ||
+      !["CE", "PE"].includes(type || "")
+    )
+      return send(res, 400, {
+        error: "Enter a valid expiry, trading day, OTM distance, option type, and budget.",
+      });
+    try {
+      return send(
+        res,
+        200,
+        await smartPickOption(expiry, day, otmPoints, budget, type),
+      );
     } catch (e) {
       return send(res, 502, { error: e.message });
     }

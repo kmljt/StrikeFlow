@@ -2997,6 +2997,28 @@
         }
       }
     </style>
+    <style id="smart-option-picker">
+      #option-dialog form{gap:14px}
+      #option-mode-tabs{display:flex;gap:4px;padding:4px;border:1px solid #25282c;border-radius:11px;background:#050607}
+      #option-mode-tabs[hidden],#manual-option-fields[hidden],#smart-option-fields[hidden]{display:none!important}
+      #option-mode-tabs button{flex:1;min-height:34px;border:1px solid transparent;border-radius:8px;background:transparent;color:#92999f;font:650 12px system-ui;cursor:pointer;transition:color .16s ease,background .16s ease,border-color .16s ease}
+      #option-mode-tabs button[aria-pressed="true"]{background:color-mix(in srgb,var(--site-accent) 12%,#111214);border-color:color-mix(in srgb,var(--site-accent) 28%,#24272b);color:var(--site-accent)}
+      .option-entry-fields{display:grid;gap:12px}
+      .smart-option-fields>p{margin:0;color:#899198;font-size:12px;line-height:1.6}
+      .smart-input-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+      .smart-input-grid .field:last-child{grid-column:1/-1}
+      .smart-input-grid .field label{font-size:10px}
+      .smart-input-grid input,.smart-input-grid select{height:42px}
+      .smart-result{padding:13px;border:1px solid color-mix(in srgb,var(--site-accent) 30%,#25282c);border-radius:11px;background:linear-gradient(135deg,color-mix(in srgb,var(--site-accent) 8%,#0a0b0c),#08090a 65%)}
+      .smart-result[hidden]{display:none!important}
+      .smart-result-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+      .smart-result-heading span{color:var(--site-accent);font-size:9px;font-weight:750;letter-spacing:.16em}
+      .smart-result-heading strong{font-size:16px;font-variant-numeric:tabular-nums}
+      .smart-result>p{margin:8px 0 12px;color:#a4abb1;font-size:11px;line-height:1.6}
+      .smart-result .button{width:100%;height:40px;background:var(--site-accent);color:#090a0b}
+      #option-submit{min-width:116px}
+      @media(max-width:520px){.smart-input-grid{grid-template-columns:1fr}.smart-input-grid .field:first-child{grid-column:auto}.smart-result-heading{align-items:flex-start;flex-direction:column;gap:4px}}
+    </style>
   </head>
   <body>
     <main class="wrap">
@@ -3198,20 +3220,48 @@
             <span id="option-dialog-title">Add option</span> to
             <span id="option-basket-name"></span>
           </h2>
-          <div class="field">
-            <label for="option-search">Option</label
-            ><input
-              id="option-search"
-              list="option-list"
-              placeholder="Search strike or type 400CE"
-              autocomplete="off"
-              disabled
-            /><datalist id="option-list"></datalist>
+          <div id="option-mode-tabs" class="option-mode-tabs">
+            <button type="button" data-option-mode="manual" aria-pressed="true">Manual</button>
+            <button type="button" data-option-mode="smart" aria-pressed="false">Smart pick</button>
           </div>
-          <div class="field">
-            <label for="lots">Lots · 65 each</label
-            ><input id="lots" type="number" min="1" step="1" value="1" />
+          <div id="manual-option-fields" class="option-entry-fields">
+            <div class="field">
+              <label for="option-search">Option</label
+              ><input
+                id="option-search"
+                list="option-list"
+                placeholder="Search strike or type 400CE"
+                autocomplete="off"
+                disabled
+              /><datalist id="option-list"></datalist>
+            </div>
+            <div class="field">
+              <label for="lots">Lots · 65 each</label
+              ><input id="lots" type="number" min="1" step="1" value="1" />
+            </div>
           </div>
+          <section id="smart-option-fields" class="smart-option-fields" hidden>
+            <p>Choose how far out of the money you want to be and your approximate premium budget.</p>
+            <div class="smart-input-grid">
+              <div class="field">
+                <label for="smart-type">Option type</label>
+                <select id="smart-type"><option value="CE">Call · CE</option><option value="PE">Put · PE</option></select>
+              </div>
+              <div class="field">
+                <label for="smart-otm-points">OTM distance · points</label>
+                <input id="smart-otm-points" type="number" min="1" max="10000" step="50" value="250" />
+              </div>
+              <div class="field">
+                <label for="smart-budget">Premium budget · ₹</label>
+                <input id="smart-budget" type="number" min="1" max="10000000" step="500" value="6000" />
+              </div>
+            </div>
+            <div id="smart-result" class="smart-result" hidden>
+              <div class="smart-result-heading"><span>BEST FIT</span><strong id="smart-result-title"></strong></div>
+              <p id="smart-result-details"></p>
+              <button id="smart-add" class="button" type="button"></button>
+            </div>
+          </section>
           <div id="option-error" class="error" hidden></div>
           <div>
             <button id="option-cancel" class="button secondary" type="button">
@@ -3234,6 +3284,6 @@
         >
       </div>
     </main>
-    <script src="app.js?v=expiry-loading-state"></script>
+    <script src="app.js?v=smart-option-pick"></script>
   </body>
 </html>

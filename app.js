@@ -163,16 +163,24 @@ window.miniHover = null;
 window.basketPnlResults = {};
 window.activeScenarioBasketId = null;
 window.scenarioChartRefs = [];
+window.optionEntryMode = "manual";
+window.smartPickResult = null;
+let smartPickRequest = 0;
 $("new-basket").addEventListener("click", addBasket);
 $("basket-dialog").addEventListener("close", finishBasketDialog);
 $("option-cancel").addEventListener("click", () => $("option-dialog").close());
 $("option-dialog-form").addEventListener("submit", (e) => {
   e.preventDefault();
-  addPosition();
+  if (window.optionEntryMode === "smart") findSmartOption();
+  else addPosition();
 });
+document.querySelectorAll("[data-option-mode]").forEach((button) =>
+  button.addEventListener("click", () => setOptionMode(button.dataset.optionMode)),
+);
+$("smart-add").addEventListener("click", addSmartPosition);
 $("option-search").addEventListener("input", updateOptionSuggestions);
 $("option-search").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
+  if (e.key === "Enter" && window.optionEntryMode === "manual") {
     e.preventDefault();
     addPosition();
   }
@@ -848,6 +856,10 @@ function openOptionDialog(id, index = null) {
   $("option-dialog-title").textContent = position
     ? "Edit option"
     : "Add option";
+  setOptionMode("manual");
+  $("option-mode-tabs").hidden = Boolean(position);
+  $("smart-result").hidden = true;
+  window.smartPickResult = null;
   $("option-submit").textContent = position ? "Save changes" : "Add option";
   $("option-search").value = position
     ? `${position.strike} ${position.optionType}`
@@ -864,6 +876,105 @@ function openOptionDialog(id, index = null) {
   }
   $("option-dialog").showModal();
   $("option-search").focus();
+}
+function setOptionMode(mode) {
+  window.optionEntryMode = mode === "smart" ? "smart" : "manual";
+  $("manual-option-fields").hidden = window.optionEntryMode === "smart";
+  $("smart-option-fields").hidden = window.optionEntryMode !== "smart";
+  document.querySelectorAll("[data-option-mode]").forEach((button) => {
+    const active = button.dataset.optionMode === window.optionEntryMode;
+    button.setAttribute("aria-pressed", String(active));
+  });
+  $("smart-result").hidden = true;
+  window.smartPickResult = null;
+  $("option-error").hidden = true;
+  $("option-submit").textContent =
+    window.optionEntryMode === "smart"
+      ? "Find smart pick"
+      : window.editPositionIndex === null || window.editPositionIndex === undefined
+        ? "Add option"
+        : "Save changes";
+}
+function formatSmartMoney(value) {
+  return `₹${Number(value).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+function formatSmartDate(day) {
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(new Date(`${day}T00:00:00Z`));
+}
+async function findSmartOption() {
+  const expiry = $("expiry").value,
+    day = dateField.value,
+    type = $("smart-type").value,
+    otmPoints = Number($("smart-otm-points").value),
+    budget = Number($("smart-budget").value),
+    submit = $("option-submit"),
+    error = $("option-error");
+  if (!expiry || expiry < day) {
+    error.textContent = "Choose an option expiry on or after the trading day.";
+    error.hidden = false;
+    return;
+  }
+  if (
+    !Number.isInteger(otmPoints) ||
+    otmPoints < 1 ||
+    !Number.isFinite(budget) ||
+    budget < 1
+  ) {
+    error.textContent = "Enter a positive OTM distance and premium budget.";
+    error.hidden = false;
+    return;
+  }
+  const requestId = ++smartPickRequest;
+  window.smartPickResult = null;
+  $("smart-result").hidden = true;
+  error.hidden = true;
+  submit.disabled = true;
+  submit.textContent = "Finding a fit…";
+  try {
+    const query = new URLSearchParams({
+        expiry,
+        day,
+        type,
+        otmPoints: String(otmPoints),
+        budget: String(budget),
+      }),
+      response = await fetch(`/api/upstox/nifty-smart-pick?${query}`),
+      result = await response.json();
+    if (requestId !== smartPickRequest) return;
+    if (!response.ok) throw Error(result.error || "Could not find an option.");
+    window.smartPickResult = { ...result, expiry };
+    const shifted = result.adjustedForBudget
+      ? `The target strike was over budget, so this is the next OTM strike that fits. `
+      : "This is the nearest listed strike at or beyond your OTM target. ";
+    $("smart-result-title").textContent = `${result.strike} ${result.type} · ${result.lots} lot${result.lots === 1 ? "" : "s"}`;
+    $("smart-result-details").textContent =
+      `${shifted}NIFTY prior close ${formatSmartMoney(result.underlyingClose)} (${formatSmartDate(result.underlyingDate)}); ${result.actualOTM} points OTM. Option prior close ${formatSmartMoney(result.premiumClose)} (${formatSmartDate(result.premiumDate)}) × ${result.lots * 65} units = ${formatSmartMoney(result.estimatedCost)}, with ${formatSmartMoney(result.remainingBudget)} left.`;
+    $("smart-add").textContent = `Add ${result.lots} lot${result.lots === 1 ? "" : "s"} · ${formatSmartMoney(result.estimatedCost)}`;
+    $("smart-result").hidden = false;
+  } catch (e) {
+    if (requestId !== smartPickRequest) return;
+    error.textContent = e.message;
+    error.hidden = false;
+  } finally {
+    if (requestId === smartPickRequest) {
+      submit.disabled = false;
+      submit.textContent = "Find smart pick";
+    }
+  }
+}
+function addSmartPosition() {
+  const suggestion = window.smartPickResult;
+  if (!suggestion) return;
+  $("option-search").value = `${suggestion.strike} ${suggestion.type}`;
+  $("lots").value = String(suggestion.lots);
+  addPosition();
 }
 function epoch(day) {
   return Math.floor(new Date(`${day}T00:00:00Z`).getTime() / 1000);

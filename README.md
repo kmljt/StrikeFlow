@@ -8,6 +8,7 @@ It uses market data from Upstox. StrikeFlow does not place orders, connect to a 
 
 - Create multiple independent option baskets and give them custom names and bright accent colors.
 - Add NIFTY 50 call and put positions, edit lot counts, and remove positions or baskets.
+- Pick options manually or use **Smart pick** to choose an OTM distance and budget and get a contract and affordable lot count from previous-session closes.
 - Compare selected baskets on synchronized NIFTY 50, basket P&L, and percentage-change charts.
 - Hover any chart to inspect the same time across the other charts.
 - See per-basket cost, current value, percentage change, max profit, max loss, drawdown, and profit kept.
@@ -59,6 +60,17 @@ basket P&L   = sum of the enabled positions’ P&L
 
 The lot multiplier is currently 65. The displayed value follows the selected price interval and uses each candle’s **close** price. Brokerage, taxes, slippage, and other transaction costs are not included.
 
+### Smart pick
+
+In **Add Option**, choose **Smart pick**, select CE or PE, enter an OTM distance in NIFTY points, and enter a premium budget. StrikeFlow reads the previous-session NIFTY close, rounds the target outward to a 50-point strike, and checks the previous-session closes of the nearest listed OTM strikes. It suggests the nearest strike with at least one whole lot inside the budget. If the target strike does not fit, it searches farther OTM among the nearby listed strikes for a fit. The suggested lot count is the largest whole number affordable at that reference premium:
+
+```text
+estimated debit = previous-session option close × lots × 65
+lots            = floor(budget ÷ (previous-session option close × 65))
+```
+
+The estimate uses historical closes for the selected trading day; the live price may differ. Smart pick does not check liquidity, spreads, or execution prices, and does not submit an order. If no nearby OTM contract has a previous close within the budget, increase the budget or OTM distance and search again.
+
 ### Scenario P&L
 
 Click a basket to open its scenario chart. It estimates that basket’s P&L for different NIFTY closing prices, anchored so the estimate at the actual close agrees with the tracked basket value. For options with time remaining, the estimate uses Black–Scholes with inferred market implied volatility when available; where volatility cannot be inferred, it uses a proxy based on the available basket positions. The model uses a 5.73% risk-free-rate proxy and 0% dividend yield. Legs at expiry use intrinsic value.
@@ -99,7 +111,7 @@ StrikeFlow/
 ├── server.js                  Local server and shared market-data API handler
 └── api/
     ├── chart.js               Chart data API route
-    └── upstox/                Upstox API route entry points for Vercel
+    └── upstox/                Market data, contract lookup, and Smart pick API routes
 ```
 
 ## Troubleshooting
