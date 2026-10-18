@@ -400,11 +400,18 @@ async function routeRequest(req, res) {
       return send(res, 401, {
         error: "Connect Upstox first to search NIFTY 50 options.",
       });
-    const expiry = url.searchParams.get("expiry");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry || ""))
-      return send(res, 400, { error: "Choose a valid NIFTY 50 expiry date." });
+    const expiry = url.searchParams.get("expiry"),
+      day = url.searchParams.get("day");
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(expiry || "") ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(day || "")
+    )
+      return send(res, 400, { error: "Choose a valid NIFTY 50 expiry and trading day." });
     try {
-      const contracts = await niftyContracts(expiry);
+      const [contracts, reference] = await Promise.all([
+        niftyContracts(expiry),
+        priorClose("NSE_INDEX|Nifty 50", day),
+      ]);
       const options = contracts
         .filter(
           (c) =>
@@ -416,9 +423,51 @@ async function routeRequest(req, res) {
           type: c.instrument_type,
         }))
         .sort((a, b) => a.strike - b.strike || a.type.localeCompare(b.type));
-      return send(res, 200, { options });
+      return send(res, 200, {
+        options,
+        referenceClose: reference?.close ?? null,
+        referenceDate: reference?.date ?? null,
+      });
     } catch (e) {
       return send(res, 502, { error: e.message });
+    }
+  }
+  if (url.pathname === "/api/upstox/nifty-option-quote") {
+    if (!hasUpstoxToken())
+      return send(res, 401, {
+        error: "Connect Upstox first to load option prices.",
+      });
+    const expiry = url.searchParams.get("expiry"),
+      day = url.searchParams.get("day"),
+      type = url.searchParams.get("type"),
+      strike = Number(url.searchParams.get("strike"));
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(expiry || "") ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(day || "") ||
+      !["CE", "PE"].includes(type || "") ||
+      !Number.isFinite(strike)
+    )
+      return send(res, 400, { error: "Choose a valid NIFTY option." });
+    try {
+      const contracts = await niftyContracts(expiry),
+        contract = contracts.find((item) =>
+          item.instrument_type === type &&
+          Number(item.strike_price) === strike,
+        );
+      if (!contract)
+        return send(res, 404, { error: "No listed contract matches this option." });
+      const premium = await priorClose(
+        contract.instrument_key,
+        day,
+        expiry < todayIST(),
+      );
+      return send(res, 200, {
+        premiumClose: premium?.close ?? null,
+        premiumDate: premium?.date ?? null,
+        lotSize: Number(contract.lot_size) || 65,
+      });
+    } catch (error) {
+      return send(res, 502, { error: error.message });
     }
   }
   if (url.pathname === "/api/upstox/nifty-suggestions") {
@@ -619,6 +668,7 @@ async function routeRequest(req, res) {
   };
   res.writeHead(200, {
     "content-type": types[path.extname(file)] || "text/plain",
+    "cache-control": "no-store",
   });
   fs.createReadStream(file).pipe(res);
 }

@@ -3004,10 +3004,25 @@
       #option-mode-tabs[hidden],#manual-option-fields[hidden],#smart-option-fields[hidden]{display:none!important}
       #option-mode-tabs button{flex:1;min-height:34px;border:1px solid transparent;border-radius:8px;background:transparent;color:#92999f;font:650 12px system-ui;cursor:pointer;transition:color .16s ease,background .16s ease,border-color .16s ease}
       #option-mode-tabs button[aria-pressed="true"]{background:color-mix(in srgb,var(--site-accent) 12%,#111214);border-color:color-mix(in srgb,var(--site-accent) 28%,#24272b);color:var(--site-accent)}
-      .option-entry-fields{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:12px}
+      .option-entry-fields{display:grid;grid-template-columns:minmax(130px,.8fr) minmax(220px,1.4fr) minmax(150px,.8fr);gap:12px}
       #option-dialog form .option-entry-fields>.field,
       #option-dialog form .smart-input-grid>.field{display:block;min-width:0;margin:0}
       .option-entry-fields .field label{white-space:nowrap}
+      .strike-reference{display:block;margin-top:6px;color:#858d94;font-size:10px;font-variant-numeric:tabular-nums}
+      #option-dialog form .manual-option-preview{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:0;padding:16px 18px;border:1px solid #30343a;border-radius:12px;background:linear-gradient(145deg,#101114,#090a0c 58%)}
+      #option-dialog form .manual-option-preview[hidden],#option-dialog form .smart-result[hidden]{display:none!important}
+      #option-dialog form .manual-option-preview-header{display:flex!important;justify-content:space-between!important;align-items:center;gap:12px;min-width:0;padding-bottom:12px;border-bottom:1px solid #272a2f}
+      #option-dialog form .manual-option-preview-identity{display:flex!important;justify-content:flex-start!important;align-items:center;gap:11px;min-width:0}
+      #option-dialog form .manual-option-side{padding:5px 8px;border:1px solid color-mix(in srgb,var(--green) 34%,transparent);border-radius:6px;background:color-mix(in srgb,var(--green) 9%,transparent);color:var(--green);font-size:9px;font-weight:750;letter-spacing:.14em}
+      #option-dialog form .manual-option-preview-title{display:inline!important;margin:0!important;color:#f1f3f5;font-size:15px;font-weight:750;font-variant-numeric:tabular-nums}
+      #option-dialog form .manual-option-preview-details{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:0;margin:0;width:100%;min-width:0;padding:4px 0}
+      #option-dialog form .manual-option-preview-row{display:grid!important;grid-template-columns:100px minmax(0,1fr)!important;justify-content:initial!important;align-items:center;gap:12px;width:100%;min-width:0;margin:0!important;padding:8px 0}
+      #option-dialog form .manual-option-preview-row span:first-child{color:#899198;font-size:9px;font-weight:750;letter-spacing:.12em}
+      #option-dialog form .manual-option-preview-row span:last-child{color:#c4c9ce;font-size:12px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+      #option-dialog form .manual-option-total{display:flex!important;justify-content:space-between!important;align-items:center;gap:12px;margin:0!important;padding-top:12px;border-top:1px solid #272a2f}
+      #option-dialog form .manual-option-total span{color:#ff786e;font-size:9px;font-weight:750;letter-spacing:.14em}
+      #option-dialog form .manual-option-total strong{color:#ff786e;font-size:16px;font-weight:750;font-variant-numeric:tabular-nums}
+      @media(max-width:520px){#option-dialog form .manual-option-preview{padding:13px}#option-dialog form .manual-option-preview-row{grid-template-columns:78px minmax(0,1fr)!important}}
       .smart-option-fields>p{margin:0;color:#899198;font-size:12px;line-height:1.6}
       .smart-input-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
       .smart-input-grid .field label{font-size:10px;white-space:nowrap}
@@ -3043,8 +3058,204 @@
       .smart-alternative-add:hover{border-color:var(--site-accent);color:var(--site-accent)}
       .smart-alternative-copy .smart-profit{color:var(--green)}
       .smart-alternative-copy .smart-loss{color:var(--red)}
+      .basket-control-actions{display:flex;align-items:center;gap:10px}
+      .basket-control-actions .button{white-space:nowrap}
+      .controls{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) auto}
+      #new-strangle{background:color-mix(in srgb,var(--site-accent) 8%,#101113);border-color:color-mix(in srgb,var(--site-accent) 30%,#292c30);color:#e8e9eb}
+      #new-strangle:hover{border-color:var(--site-accent);color:var(--site-accent)}
+      #strangle-dialog{width:min(620px,calc(100% - 32px));padding:0;border:1px solid #34383d;border-radius:18px;background:#090a0c;color:#f0f2f4;box-shadow:0 24px 80px #000b}
+      #strangle-dialog::backdrop{background:#000b;backdrop-filter:blur(8px)}
+      #strangle-form{display:grid;gap:16px;padding:24px}
+      #strangle-form h2{margin:0;font-size:22px;letter-spacing:-.04em}
+      #strangle-form>p{margin:0;color:#92999f;font-size:13px;line-height:1.5}
+      .strangle-inputs{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+      .strangle-inputs .field{min-width:0}
+      .strangle-inputs input{width:100%;height:48px;padding:0 13px;border:1px solid #30353a;border-radius:10px;background:#050607;color:#f0f2f4;font:inherit}
+      .strangle-result{display:grid;gap:12px;padding:16px;border:1px solid color-mix(in srgb,var(--site-accent) 35%,#25282c);border-radius:13px;background:linear-gradient(135deg,color-mix(in srgb,var(--site-accent) 8%,#0a0b0c),#08090a 65%)}
+      .strangle-result[hidden]{display:none!important}
+      .strangle-legs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+      .strangle-leg{display:grid;gap:5px;padding:12px;border:1px solid #282c30;border-radius:10px;background:#090a0c}
+      .strangle-leg span{color:#92999f;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+      .strangle-leg strong{font-size:15px;font-variant-numeric:tabular-nums}
+      .strangle-leg small{color:#adb4ba;font-size:11px;font-variant-numeric:tabular-nums}
+      .strangle-total{display:flex;justify-content:space-between;gap:12px;padding-top:10px;border-top:1px solid #282c30;font-size:12px;font-variant-numeric:tabular-nums}
+      .strangle-total strong{color:var(--green)}
+      .strangle-total strong.over{color:var(--red)}
+      #strangle-form .strangle-actions{display:flex;justify-content:flex-end;gap:9px;margin:0}
+      @media(max-width:760px){.controls{grid-template-columns:repeat(2,minmax(0,1fr))}.basket-control-actions{grid-column:1/-1;justify-self:stretch}.basket-control-actions .button{width:auto;flex:1}}
+      @media(max-width:520px){.basket-control-actions{display:grid;grid-template-columns:1fr 1fr;grid-column:1/-1}.basket-control-actions .button{width:100%;padding-inline:8px;font-size:12px}#strangle-form{padding:18px}.strangle-inputs,.strangle-legs{grid-template-columns:1fr}}
       #option-submit{min-width:116px}
       @media(max-width:520px){.option-entry-fields{grid-template-columns:minmax(0,1fr)}.smart-input-grid{grid-template-columns:1fr}.smart-result,#option-dialog form .smart-result{grid-template-columns:minmax(0,1fr)!important;gap:14px}.smart-result .button{width:100%!important;min-width:0}}
+    </style>
+    <style id="ui-final-touch">
+      :root{--surface-0:#050607;--surface-1:#090a0c;--surface-2:#0e1013;--stroke-strong:#30343a;--text-muted:#9098a0}
+      body{background:radial-gradient(ellipse at 50% -28%,color-mix(in srgb,var(--site-accent) 8%,transparent),transparent 56%),#030405}
+      .wrap{width:min(1360px,calc(100% - 56px));padding:36px 0 52px}
+      .hero{align-items:center;gap:24px;margin:0 0 24px;padding:20px 22px;border:1px solid #24272d;border-radius:16px;background:linear-gradient(135deg,color-mix(in srgb,var(--site-accent) 5%,#0d0e11),#070809 68%);box-shadow:inset 0 1px #ffffff08}
+      .hero-copy{gap:9px}
+      .hero h1{font-size:clamp(32px,4vw,44px)}
+      .hero p{font-size:14px}
+      .session{flex-wrap:nowrap;justify-content:flex-end;gap:7px;max-width:100%;width:max-content;margin-left:auto;padding:7px 9px;border-color:#292d33;background:#08090b}
+      .session-divider{height:20px}
+      .provider-status{min-height:34px}
+      .controls{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:14px;padding:18px}
+      .field label{margin-left:1px;color:#9da5ad;font-size:10px;letter-spacing:.11em}
+      .field input,.field select,.date-display,.strangle-inputs input{height:46px;border-color:#2b3036;background:#050607;border-radius:10px;transition:border-color .16s ease,box-shadow .16s ease,background .16s ease}
+      .field input:hover,.field select:hover,.date-display:hover,.strangle-inputs input:hover{border-color:#41474e}
+      .field input:focus,.field select:focus,.date-display:focus-within,.strangle-inputs input:focus{border-color:var(--site-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--site-accent) 15%,transparent)}
+      .button{min-height:42px;border-radius:10px;font:700 13px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;transition:transform .16s ease,background .16s ease,border-color .16s ease,color .16s ease,box-shadow .16s ease}
+      .button:not(:disabled):hover{transform:translateY(-1px)}
+      .button:active:not(:disabled){transform:translateY(0) scale(.99)}
+      .button:disabled{opacity:.5;cursor:not-allowed;filter:saturate(.7)}
+      .button.secondary{background:#111316;border-color:#30343a;color:#e6e9ec}
+      .button.secondary:hover{background:#17191d;border-color:#50565d}
+      #new-basket,#new-strangle{min-height:46px;padding-inline:16px;border-radius:10px}
+      #new-basket{background:color-mix(in srgb,var(--site-accent) 14%,#0b0c0e);border-color:color-mix(in srgb,var(--site-accent) 40%,#24272d);color:color-mix(in srgb,var(--site-accent) 80%,#fff)}
+      #new-strangle{background:#101215;border-color:#30343a;color:#e5e8eb}
+      #new-strangle:hover{background:color-mix(in srgb,var(--site-accent) 9%,#101215);border-color:color-mix(in srgb,var(--site-accent) 46%,#30343a);color:#f4f5f7}
+      .basket-section-head{margin:32px 2px 13px}
+      .basket-section-head h2{font-size:24px}
+      .baskets{gap:13px}
+      .basket{padding:16px 18px;border-radius:14px;transition:border-color .16s ease,box-shadow .16s ease,background .16s ease}
+      .basket:hover{transform:none}
+      .basket-head{gap:9px}
+      .basket-head h2{font-size:15px}
+      .basket-head .button{min-height:35px;height:35px}
+      .basket-metrics{gap:28px;margin-top:12px;padding:14px 2px 3px}
+      .basket-metrics strong{font-size:14px}
+      .basket-performance{gap:0;margin-top:10px;padding:10px 0}
+      .performance-stat{padding-inline:12px}
+      .performance-stat>span{font-size:9px;letter-spacing:.09em}
+      .performance-stat>strong{font-size:14px}
+      .basket-list{gap:7px;margin-top:12px}
+      .basket-item{min-height:60px;gap:12px;padding:10px 12px;border-color:#20242a;background:#08090b}
+      .basket-item:hover{border-color:#343941;background:#0c0d10}
+      .instrument-info{min-width:0}
+      .instrument-info>span{font-size:12px;line-height:1.45}
+      .instrument-info small{font-size:10px}
+      .position-totals{gap:20px}
+      .position-total{min-width:72px}
+      .position-total>span{font-size:8px;letter-spacing:.09em}
+      .position-total>strong{font-size:12px}
+      .remove-item{min-height:30px;padding:5px 8px;border:1px solid transparent;border-radius:7px;color:#8b929a;font:600 10px/1 system-ui,sans-serif;transition:color .15s ease,background .15s ease,border-color .15s ease}
+      .edit-item:hover{border-color:#343941;background:#121418;color:#f0f2f4}
+      .remove-item:not(.edit-item):hover{border-color:#4a2929;background:#1b0e0e;color:#ff968c}
+      .selection-check{width:14px;height:14px;flex:0 0 auto}
+      .content{margin-top:16px;padding:18px;border-radius:16px}
+      .mini-plot,.main-plot{padding-inline:0}
+      .mini-chart-wrap{height:190px;border-radius:11px}
+      .percent-plot .mini-chart-wrap{height:230px}
+      .chart-wrap{height:clamp(320px,38vw,460px);border-radius:12px}
+      .chart-tooltip{max-width:min(320px,calc(100vw - 40px));padding:10px 12px;box-shadow:0 12px 36px #000a}
+      .basket-legend{gap:8px 10px}
+      .basket-legend span{max-width:100%;padding:5px 9px}
+      .basket-legend .legend-change{font-variant-numeric:tabular-nums}
+      .scenario-panel{margin-top:14px;padding-top:13px;border-color:#252a30}
+      .scenario-title{flex-wrap:wrap;gap:8px}
+      .scenario-title strong{font-size:13px}
+      .scenario-controls{gap:5px}
+      .scenario-control{min-width:32px;height:30px;border-color:#30353a;background:#0d0f12;color:#d8dce0;transition:background .15s ease,border-color .15s ease,color .15s ease}
+      .scenario-control:hover{border-color:var(--site-accent);background:color-mix(in srgb,var(--site-accent) 9%,#0d0f12);color:#fff}
+      .scenario-chart-wrap{height:clamp(220px,28vw,320px);border-radius:11px}
+      .mini-empty,.chart-empty{padding:20px;color:#9aa2aa;font-size:12px}
+      .foot{margin-top:32px;padding-top:16px;border-top:1px solid #171a1e;color:#737b83;font-size:9px;letter-spacing:.12em}
+      .foot a{color:#b5bdc5;text-underline-offset:3px}
+      .foot a:hover{color:var(--site-accent)}
+      dialog{max-height:min(92vh,900px);overflow:auto;overscroll-behavior:contain;scrollbar-color:#343941 #090a0c}
+      #token-dialog form,#basket-dialog form,#option-dialog form,#strangle-form{gap:16px}
+      #token-dialog form{padding:26px}
+      #token-dialog h2{font-size:24px;letter-spacing:-.045em}
+      #token-dialog p{line-height:1.65}
+      #basket-dialog form,#option-dialog form{padding:24px}
+      #basket-dialog h2,#option-dialog h2,#strangle-form h2{font-size:22px;line-height:1.2;letter-spacing:-.045em}
+      #option-dialog{width:min(760px,calc(100% - 32px))}
+      #option-dialog form>div:last-child,#basket-dialog form>div:last-child,#token-dialog form>.token-actions,#strangle-form .strangle-actions{display:flex;justify-content:flex-end;align-items:center;gap:9px;margin:4px 0 0}
+      #option-dialog form>div:last-child .button,#basket-dialog form>div:last-child .button,#strangle-form .strangle-actions .button{min-width:104px}
+      #option-mode-tabs{padding:4px;border-color:#262a30;background:#050607}
+      #option-mode-tabs button{min-height:39px;font-size:12px}
+      .option-entry-fields{grid-template-columns:minmax(140px,.85fr) minmax(190px,1.25fr) minmax(140px,.8fr);gap:12px}
+      .smart-input-grid{gap:12px}
+      .smart-input-grid .field label{font-size:9px}
+      .smart-result{border-radius:12px}
+      .manual-option-preview{margin-top:1px}
+      .error{padding:11px 13px;border-radius:9px;line-height:1.45}
+      .date-picker{z-index:50;border-color:#32373d}
+      :where(button,select,input,a,[tabindex]):focus-visible{outline:2px solid color-mix(in srgb,var(--site-accent) 82%,#fff);outline-offset:2px}
+      ::selection{background:color-mix(in srgb,var(--site-accent) 36%,#111);color:#fff}
+      @media(max-width:760px){
+        .wrap{width:calc(100% - 40px);padding-top:28px}
+        .hero{align-items:flex-start;flex-direction:column;gap:16px}
+        .session{justify-content:flex-end;align-self:flex-end;width:max-content}
+        .controls{grid-template-columns:repeat(2,minmax(0,1fr))}
+        .basket-control-actions{grid-column:1/-1;justify-self:end}
+        .chart-wrap{height:360px}
+      }
+      @media(max-width:620px){
+        .wrap{width:calc(100% - 28px);padding:18px 0 34px}
+        .hero{padding:17px;border-radius:13px}
+        .hero h1{font-size:34px}
+        .hero p{font-size:13px}
+        .session{gap:7px;padding:8px}
+        .session label{font-size:10px}
+        .session select{font-size:11px}
+        .session-divider{display:none}
+        .theme-picker{margin-left:0}
+        .controls{grid-template-columns:1fr;gap:12px;padding:14px}
+        .basket-control-actions{display:grid;grid-template-columns:1fr 1fr;grid-column:auto;justify-self:stretch;gap:8px}
+        .basket-control-actions .button{width:100%;padding-inline:9px;font-size:11px}
+        .basket-section-head{margin:25px 2px 11px}
+        .basket{padding:13px}
+        .basket-head{gap:7px}
+        .basket-head h2{max-width:none}
+        .basket-head .spacer{min-width:0}
+        .basket-head .button{padding-inline:9px;font-size:10px}
+        .basket-color-picker{width:25px;height:25px;flex-basis:25px}
+        .basket-random-color{width:24px;height:24px}
+        .basket-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:10px}
+        .basket-metrics strong{font-size:12px}
+        .basket-performance{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:12px}
+        .performance-stat:nth-child(2){border-right:0}
+        .performance-stat:nth-child(3){padding-left:2px}
+        .basket-item{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:8px}
+        .instrument-info{grid-column:2;grid-row:1}
+        .position-totals{grid-column:2/-1;grid-row:2;justify-content:space-between;margin:3px 0 0}
+        .basket-item>.edit-item,.basket-item>.remove-item{grid-row:1}
+        .basket-item>.edit-item{grid-column:3}
+        .basket-item>.remove-item{grid-column:4}
+        .position-total{text-align:left}
+        .position-total>span{font-size:8px}
+        .position-total>strong{font-size:11px}
+        .content{padding:13px}
+        .chart-wrap{height:300px}
+        .mini-chart-wrap{height:165px}
+        .percent-plot .mini-chart-wrap{height:190px}
+        .scenario-chart-wrap{height:220px}
+        .basket-legend span{font-size:10px}
+        .legend{flex-wrap:wrap}
+        #option-dialog,#strangle-dialog,#token-dialog,#basket-dialog{width:calc(100% - 20px);max-height:calc(100dvh - 24px)}
+        #option-dialog form,#strangle-form,#basket-dialog form,#token-dialog form{gap:13px;padding:18px}
+        #option-entry-fields,.option-entry-fields{grid-template-columns:1fr}
+        .option-entry-fields .field label{white-space:normal}
+        .smart-input-grid{grid-template-columns:1fr}
+        .smart-result{gap:13px;padding:14px}
+        .smart-result .button{width:100%;min-width:0}
+        .strangle-inputs,.strangle-legs{grid-template-columns:1fr}
+        #option-dialog form>div:last-child,#basket-dialog form>div:last-child,#token-dialog form>.token-actions,#strangle-form .strangle-actions{flex-wrap:wrap}
+        #option-dialog form>div:last-child .button,#basket-dialog form>div:last-child .button,#strangle-form .strangle-actions .button{flex:1}
+      }
+      @media(max-width:380px){
+        .wrap{width:calc(100% - 20px)}
+        .session{display:grid;grid-template-columns:auto 1fr auto;justify-content:stretch}
+        .session select{justify-self:end}
+        .provider-status{grid-column:1/3;justify-self:start}
+        .theme-picker{grid-column:3;grid-row:2}
+        .basket-control-actions{grid-template-columns:1fr}
+        .basket-control-actions .button{min-height:40px}
+        .position-totals{gap:8px}
+        .position-total{min-width:0}
+        .position-total>strong{font-size:10px}
+      }
+      @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
     </style>
   </head>
   <body>
@@ -3081,6 +3292,65 @@
           /></label>
         </div>
       </header>
+      <section id="output" class="card content" aria-live="polite" hidden>
+        <div class="result-head">
+          <div>
+            <div class="ticker"><h2 id="title">Options P&amp;L</h2></div>
+            <div id="dates" class="subline"></div>
+          </div>
+        </div>
+        <section class="mini-plot">
+          <h3>NIFTY 50</h3>
+          <div class="mini-chart-wrap">
+            <canvas
+              id="nifty-chart"
+              aria-label="NIFTY 50 intraday price chart"
+            ></canvas>
+            <div id="nifty-tooltip" class="chart-tooltip" hidden>
+              <div id="nifty-tooltip-time" class="tooltip-time"></div>
+              <div id="nifty-tooltip-rows"></div>
+            </div>
+            <div id="nifty-empty" class="mini-empty" hidden></div>
+          </div>
+        </section>
+        <section id="pnl-plot" class="main-plot">
+          <h3>Basket P&amp;L (₹)</h3>
+          <div class="chart-wrap">
+            <canvas
+              id="chart"
+              aria-label="Basket P&L comparison chart"
+            ></canvas>
+            <div id="chart-tooltip" class="chart-tooltip" hidden>
+              <div id="tooltip-time" class="tooltip-time"></div>
+              <div id="tooltip-rows"></div>
+            </div>
+            <div id="empty" class="chart-empty" hidden></div>
+          </div>
+        </section>
+        <div id="basket-legend" class="basket-legend"></div>
+        <div class="legend"><span id="chart-range"></span></div>
+        <section id="percent-plot" class="mini-plot percent-plot">
+          <h3>Basket change (%)</h3>
+          <div class="mini-chart-wrap">
+            <canvas
+              id="percent-chart"
+              aria-label="Basket percentage change chart"
+            ></canvas>
+            <div id="percent-tooltip" class="chart-tooltip" hidden>
+              <div id="percent-tooltip-time" class="tooltip-time"></div>
+              <div id="percent-tooltip-rows"></div>
+            </div>
+            <div id="percent-empty" class="mini-empty" hidden></div>
+          </div>
+          <div id="percent-legend" class="basket-legend mini-legend"></div>
+        </section>
+      </section>
+      <div class="basket-section-head">
+        <div>
+          <span class="section-kicker">PORTFOLIO</span>
+          <h2>Baskets</h2>
+        </div>
+      </div>
       <section class="card controls" aria-label="Basket controls">
         <div class="field date-field">
           <label for="date-open">Trading day</label>
@@ -3126,69 +3396,15 @@
             <option value="">Option expiry unavailable</option>
           </select>
         </div>
-        <button id="new-basket" class="button secondary" type="button">
-          ＋ Add Basket
-        </button>
-      </section>
-      <section id="output" class="card content" aria-live="polite" hidden>
-        <div class="result-head">
-          <div>
-            <div class="ticker"><h2 id="title">Options P&amp;L</h2></div>
-            <div id="dates" class="subline"></div>
-          </div>
+        <div class="basket-control-actions">
+          <button id="new-basket" class="button secondary" type="button">
+            ＋ Add Basket
+          </button>
+          <button id="new-strangle" class="button secondary" type="button">
+            ＋ Add Strangle
+          </button>
         </div>
-        <section class="mini-plot">
-          <h3>NIFTY 50</h3>
-          <div class="mini-chart-wrap">
-            <canvas
-              id="nifty-chart"
-              aria-label="NIFTY 50 intraday price chart"
-            ></canvas>
-            <div id="nifty-tooltip" class="chart-tooltip" hidden>
-              <div id="nifty-tooltip-time" class="tooltip-time"></div>
-              <div id="nifty-tooltip-rows"></div>
-            </div>
-            <div id="nifty-empty" class="mini-empty" hidden></div>
-          </div>
-        </section>
-        <section class="main-plot">
-          <h3>Basket P&amp;L (₹)</h3>
-          <div class="chart-wrap">
-            <canvas
-              id="chart"
-              aria-label="Basket P&L comparison chart"
-            ></canvas>
-            <div id="chart-tooltip" class="chart-tooltip" hidden>
-              <div id="tooltip-time" class="tooltip-time"></div>
-              <div id="tooltip-rows"></div>
-            </div>
-            <div id="empty" class="chart-empty" hidden></div>
-          </div>
-        </section>
-        <div id="basket-legend" class="basket-legend"></div>
-        <div class="legend"><span id="chart-range"></span></div>
-        <section class="mini-plot percent-plot">
-          <h3>Basket change (%)</h3>
-          <div class="mini-chart-wrap">
-            <canvas
-              id="percent-chart"
-              aria-label="Basket percentage change chart"
-            ></canvas>
-            <div id="percent-tooltip" class="chart-tooltip" hidden>
-              <div id="percent-tooltip-time" class="tooltip-time"></div>
-              <div id="percent-tooltip-rows"></div>
-            </div>
-            <div id="percent-empty" class="mini-empty" hidden></div>
-          </div>
-          <div id="percent-legend" class="basket-legend mini-legend"></div>
-        </section>
       </section>
-      <div class="basket-section-head">
-        <div>
-          <span class="section-kicker">PORTFOLIO</span>
-          <h2>Baskets</h2>
-        </div>
-      </div>
       <section
         id="baskets"
         class="baskets"
@@ -3253,20 +3469,31 @@
           </div>
           <div id="manual-option-fields" class="option-entry-fields">
             <div class="field">
-              <label for="option-search">Option</label
-              ><input
-                id="option-search"
-                list="option-list"
-                placeholder="Search strike or type 400CE"
-                autocomplete="off"
-                disabled
-              /><datalist id="option-list"></datalist>
+              <label for="option-type-select">Option type</label>
+              <select id="option-type-select" disabled>
+                <option value="CE">Call · CE</option>
+                <option value="PE">Put · PE</option>
+              </select>
             </div>
             <div class="field">
-              <label for="lots">Lots · 65 each</label
-              ><input id="lots" type="number" min="1" step="1" value="1" />
+              <label for="strike-input">Strike · ₹50 steps</label>
+              <input id="strike-input" type="number" min="0" step="50" placeholder="Nearest to prior close" disabled />
+              <small id="strike-reference" class="strike-reference"></small>
+            </div>
+            <div class="field">
+              <label for="lots">Lots · 65 each</label>
+              <input id="lots" type="number" min="1" step="1" value="1" />
             </div>
           </div>
+          <section id="manual-option-preview" class="manual-option-preview" hidden aria-live="polite">
+            <div class="manual-option-preview-header">
+              <div class="manual-option-preview-identity">
+                <span class="manual-option-side">LONG</span><strong id="manual-option-preview-title" class="manual-option-preview-title"></strong>
+              </div>
+            </div>
+            <div id="manual-option-preview-details" class="manual-option-preview-details"></div>
+            <div class="manual-option-total"><span>ESTIMATED DEBIT</span><strong id="manual-option-preview-total">—</strong></div>
+          </section>
           <section id="smart-option-fields" class="smart-option-fields" hidden>
             <p>Choose your OTM distance and approximate budget.</p>
             <div class="smart-input-grid">
@@ -3307,6 +3534,34 @@
           </div>
         </form>
       </dialog>
+      <dialog id="strangle-dialog">
+        <form id="strangle-form" novalidate>
+          <h2>Add a smart strangle</h2>
+          <p>Choose the strike offset and total premium budget. We’ll split the budget evenly between the call and put, using the previous session’s prices.</p>
+          <div class="strangle-inputs">
+            <div class="field">
+              <label for="strangle-otm">Strike offset · points</label>
+              <input id="strangle-otm" type="number" min="-10000" max="10000" step="50" value="250" />
+            </div>
+            <div class="field">
+              <label for="strangle-budget">Total premium budget · ₹</label>
+              <input id="strangle-budget" type="number" min="100" max="10000000" step="100" value="6000" />
+            </div>
+          </div>
+          <div id="strangle-error" class="error" hidden></div>
+          <section id="strangle-result" class="strangle-result" hidden>
+            <div class="strangle-legs">
+              <div class="strangle-leg"><span>Call · CE</span><strong id="strangle-call-title"></strong><small id="strangle-call-detail"></small></div>
+              <div class="strangle-leg"><span>Put · PE</span><strong id="strangle-put-title"></strong><small id="strangle-put-detail"></small></div>
+            </div>
+            <div class="strangle-total"><span id="strangle-total-label"></span><strong id="strangle-total-value"></strong></div>
+          </section>
+          <div class="strangle-actions">
+            <button id="strangle-cancel" class="button secondary" type="button">Cancel</button>
+            <button id="strangle-add" class="button" type="button" disabled>Add strangle</button>
+          </div>
+        </form>
+      </dialog>
 
       <div id="error" class="error" hidden></div>
       <div class="foot">
@@ -3319,6 +3574,6 @@
         >
       </div>
     </main>
-    <script src="app.js?v=nifty-empty-portfolio"></script>
+    <script src="app.js?v=manual-option-controls"></script>
   </body>
 </html>
