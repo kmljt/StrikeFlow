@@ -618,7 +618,7 @@ async function routeRequest(req, res) {
       !/^\d{4}-\d{2}-\d{2}$/.test(day || "") ||
       expiry < day ||
       !Number.isInteger(otmPoints) ||
-      otmPoints < 0 ||
+      otmPoints < -10000 ||
       otmPoints > 10000 ||
       otmPoints % 50 !== 0 ||
       !Number.isInteger(lots) ||
@@ -626,7 +626,7 @@ async function routeRequest(req, res) {
       lots > 10000
     )
       return send(res, 400, {
-        error: "Enter a valid expiry, OTM distance, and lot count.",
+        error: "Enter a valid expiry, strike offset, and lot count.",
       });
     try {
       const [reference, contracts] = await Promise.all([

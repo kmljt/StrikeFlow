@@ -180,7 +180,7 @@ let smartStrangleRequest = 0;
 let smartStrangleDebounce = null;
 let simpleStrangleRequest = 0;
 let simpleStrangleDebounce = null;
-window.strangleMode = "smart";
+window.strangleMode = "simple";
 let optionContractsRequest = 0;
 let manualOptionPreviewRequest = 0;
 let manualOptionPreviewDebounce = null;
@@ -311,11 +311,28 @@ const IST_OFFSET = 19800;
 function loadState() {
   try {
     const s = JSON.parse(localStorage.getItem("pnl-baskets") || "null");
-    if (Array.isArray(s?.baskets)) return s;
+    if (Array.isArray(s?.baskets)) {
+      let changed = false;
+      s.baskets.forEach((basket, index) => {
+        if (!/^#[0-9a-f]{6}$/i.test(basket.accentColor || "")) {
+          basket.accentColor = basketAccentHex(index);
+          changed = true;
+        }
+      });
+      if (changed) localStorage.setItem("pnl-baskets", JSON.stringify(s));
+      return s;
+    }
   } catch {}
   return {
     activeId: "basket-1",
-    baskets: [{ id: "basket-1", name: "Basket 1", items: [] }],
+    baskets: [
+      {
+        id: "basket-1",
+        name: "Basket 1",
+        accentColor: basketAccentHex(0),
+        items: [],
+      },
+    ],
   };
 }
 function saveState() {
@@ -408,7 +425,8 @@ function renderBaskets() {
   const host = $("baskets");
   host.replaceChildren();
   window.scenarioChartRefs = [];
-  state.baskets.forEach((b, index) => {
+  sortBasketInfo(state.baskets).forEach((b) => {
+    const index = state.baskets.indexOf(b);
     const result = window.basketPnlResults[b.id],
       valid = result?.day === dateField.value,
       displayName = basketDisplayName(b);
@@ -862,6 +880,16 @@ function invalidateResults() {
   renderBaskets();
   scheduleRefresh();
 }
+function nextBasketAccentColor() {
+  const used = new Set(
+    state.baskets.map((basket) => basket.accentColor?.toLowerCase()),
+  );
+  for (let index = 0; index <= state.baskets.length; index++) {
+    const color = basketAccentHex(index);
+    if (!used.has(color.toLowerCase())) return color;
+  }
+  return randomBrightHex();
+}
 function addBasket() {
   invalidateResults();
   const n =
@@ -872,6 +900,7 @@ function addBasket() {
   state.baskets.push({
     id: `basket-${Date.now()}`,
     name: `Basket ${n}`,
+    accentColor: nextBasketAccentColor(),
     items: [],
   });
   saveState();
@@ -884,18 +913,18 @@ function nextBasketNumber() {
   }, 0) + 1;
 }
 function openSmartStrangle() {
-  window.strangleMode = "smart";
-  setStrangleMode("smart", false);
+  window.strangleMode = "simple";
+  setStrangleMode("simple", false);
   window.smartStrangleResult = null;
   window.simpleStrangleResult = null;
   $("strangle-result").hidden = true;
   $("simple-strangle-result").hidden = true;
   $("strangle-error").hidden = true;
   $("strangle-add").disabled = true;
-  $("strangle-add").textContent = "Finding picks…";
+  $("strangle-add").textContent = "Finding strikes…";
   $("strangle-dialog").showModal();
-  scheduleSmartStrangle();
-  $("strangle-otm").focus();
+  scheduleSimpleStrangle();
+  $("simple-strangle-otm").focus();
 }
 function setStrangleMode(mode, refresh = true) {
   window.strangleMode = mode === "simple" ? "simple" : "smart";
@@ -1037,6 +1066,7 @@ function addSmartStrangle() {
     name: `Basket ${basketNumber}`,
     customName: false,
     enabled: true,
+    accentColor: nextBasketAccentColor(),
     items,
   });
   saveState();
@@ -1058,9 +1088,9 @@ function scheduleSimpleStrangle() {
     input = $("simple-strangle-otm"),
     offset = Number(input.value),
     lots = Number($("simple-strangle-lots").value);
-  if (input.value.trim() !== "" && Number.isFinite(offset) && offset >= 0)
-    input.value = String(Math.min(10000, Math.round(offset / 50) * 50));
-  if (!expiry || expiry < day || input.value.trim() === "" || !Number.isFinite(offset) || offset < 0 || offset > 10000 || !Number.isInteger(lots) || lots < 1 || lots > 10000) {
+  if (input.value.trim() !== "" && Number.isFinite(offset))
+    input.value = String(Math.max(-10000, Math.min(10000, Math.round(offset / 50) * 50)));
+  if (!expiry || expiry < day || input.value.trim() === "" || !Number.isFinite(offset) || offset < -10000 || offset > 10000 || !Number.isInteger(lots) || lots < 1 || lots > 10000) {
     if (!expiry || expiry < day) {
       $("strangle-error").textContent = "Choose an option expiry on or after the trading day.";
       $("strangle-error").hidden = false;
@@ -1079,8 +1109,8 @@ async function findSimpleStrangle(requestId = ++simpleStrangleRequest) {
     input = $("simple-strangle-otm"),
     rawOffset = Number(input.value),
     lots = Number($("simple-strangle-lots").value),
-    offset = Number.isFinite(rawOffset) && rawOffset >= 0
-      ? Math.min(10000, Math.round(rawOffset / 50) * 50)
+    offset = Number.isFinite(rawOffset) && rawOffset >= -10000
+      ? Math.max(-10000, Math.min(10000, Math.round(rawOffset / 50) * 50))
       : null;
   if (!expiry || expiry < day || offset === null || input.value.trim() === "" || !Number.isInteger(lots) || lots < 1 || lots > 10000) {
     $("strangle-add").disabled = true;
@@ -1099,7 +1129,7 @@ async function findSimpleStrangle(requestId = ++simpleStrangleRequest) {
     window.simpleStrangleResult = result;
     const renderLeg = (prefix, leg) => {
       $(`simple-${prefix}-title`).textContent = `${leg.strike} ${leg.type} · ${leg.lots} lot${leg.lots === 1 ? "" : "s"}`;
-      $(`simple-${prefix}-detail`).textContent = `${Math.abs(leg.actualOTM)} points OTM · ${leg.estimatedCost === null ? "previous close unavailable" : `${formatSmartMoney(leg.estimatedCost)} total`}`;
+      $(`simple-${prefix}-detail`).textContent = `${formatMoneyness(leg.actualOTM)} from prior close · ${leg.estimatedCost === null ? "previous close unavailable" : `${formatSmartMoney(leg.estimatedCost)} total`}`;
     };
     renderLeg("call", result.call);
     renderLeg("put", result.put);
@@ -1140,6 +1170,7 @@ function addSimpleStrangle() {
     name: `Basket ${basketNumber}`,
     customName: false,
     enabled: true,
+    accentColor: nextBasketAccentColor(),
     items,
   });
   saveState();
@@ -1491,7 +1522,7 @@ function basketDisplayName(b) {
         return `Long Straddle · ${call.strike}${expiryLabel ? ` · ${expiryLabel}` : ""}`;
       if (call.strike > put.strike)
         return `Long Strangle · ${put.strike}/${call.strike}${expiryLabel ? ` · ${expiryLabel}` : ""}`;
-      return `Reverse Strangle · ${call.strike}/${put.strike}${expiryLabel ? ` · ${expiryLabel}` : ""}`;
+      return `Reverse Strangle · ${put.strike}/${call.strike}${expiryLabel ? ` · ${expiryLabel}` : ""}`;
     }
     if (items.every((p) => p.optionType === items[0].optionType)) {
       const side = items[0].optionType === "CE" ? "Call" : "Put",
@@ -1505,6 +1536,39 @@ function basketDisplayName(b) {
   return expiries.length === 1
     ? `${items.length}-leg combo${expiryLabel ? ` · ${expiryLabel}` : ""}`
     : `Multi-expiry · ${items.length} legs`;
+}
+function sortBasketInfo(entries) {
+  const strikePair = (entry) => {
+    const basket = state.baskets.find((candidate) => candidate.id === entry.id);
+    const items = basket?.items || [];
+    const putStrike = Number(
+      items.find((item) => item.optionType === "PE")?.strike,
+    );
+    const callStrike = Number(
+      items.find((item) => item.optionType === "CE")?.strike,
+    );
+    if (Number.isFinite(putStrike))
+      return [putStrike, Number.isFinite(callStrike) ? callStrike : Infinity];
+    const match = String(entry.name || "").match(/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)/);
+    return match ? [Number(match[1]), Number(match[2])] : [Infinity, Infinity];
+  };
+  return [...entries].sort(
+    (a, b) => {
+      const [aPut, aCall] = strikePair(a),
+        [bPut, bCall] = strikePair(b);
+      return (
+        aPut - bPut ||
+        aCall - bCall ||
+        String(a.name || "").localeCompare(String(b.name || ""), "en", {
+        numeric: true,
+        })
+      );
+    },
+  );
+}
+function basketInfoName(entry) {
+  const basket = state.baskets.find((candidate) => candidate.id === entry.id);
+  return basket ? basketDisplayName(basket) : entry.name;
 }
 function updateUpstoxStatus(label = null) {
   const button = $("upstox-status");
@@ -2470,14 +2534,14 @@ async function loadNiftyOnly(day, interval, generation) {
 function renderLegend(data) {
   const el = $("basket-legend");
   el.replaceChildren(
-    ...data.map((b) => {
+    ...sortBasketInfo(data).map((b) => {
       const item = document.createElement("span"),
         dot = document.createElement("i"),
         name = document.createElement("span"),
         value = document.createElement("strong"),
         change = document.createElement("small");
       dot.style.background = b.color;
-      name.textContent = b.name;
+      name.textContent = basketInfoName(b);
       value.textContent = signed(b.ending);
       value.className = b.ending >= 0 ? "green" : "red";
       change.className = `legend-change ${b.percent >= 0 ? "green" : "red"}`;
@@ -2826,14 +2890,14 @@ function drawMiniPlots(data) {
   const percent = data.percent,
     legend = $("percent-legend");
   legend.replaceChildren(
-    ...percent.series.map((s) => {
+    ...sortBasketInfo(percent.series).map((s) => {
       const item = document.createElement("span"),
         dot = document.createElement("i"),
         name = document.createElement("span"),
         change = document.createElement("small"),
         value = s.values.at(-1) || 0;
       dot.style.background = s.color;
-      name.textContent = s.name;
+      name.textContent = basketInfoName(s);
       change.className = `legend-change ${value >= 0 ? "green" : "red"}`;
       change.textContent = `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
       item.append(dot, name, change);
@@ -3070,7 +3134,7 @@ function showMiniHover(e) {
               },
             ]
           : []
-        : d?.percent.series || [],
+        : sortBasketInfo(d?.percent.series || []),
     times =
       mode === "price"
         ? d?.index.points?.map((p) => p.t) || []
@@ -3104,7 +3168,10 @@ function showMiniHover(e) {
       const row = document.createElement("div");
       row.className = "tooltip-row";
       const label = document.createElement("span");
-      label.textContent = mode === "price" ? s.name : minimalBasketName(s.name);
+      label.textContent =
+        mode === "price"
+          ? s.name
+          : minimalBasketName(basketInfoName(s));
       label.style.color = s.color;
       if (mode === "price") {
         const value = document.createElement("div");
@@ -3183,22 +3250,22 @@ function showChartHover(e) {
   $("tooltip-time").textContent = time(d.times[i]);
   const rows = $("tooltip-rows");
   rows.replaceChildren(
-    ...d.baskets.map((b, j) => {
+    ...sortBasketInfo(d.baskets.map((basket, index) => ({ ...basket, index }))).map((b) => {
       const row = document.createElement("div");
       row.className = "tooltip-row";
       const label = document.createElement("span");
       label.className = "tooltip-basket-name";
-      label.textContent = minimalBasketName(b.name);
+      label.textContent = minimalBasketName(basketInfoName(b));
       label.style.color = b.color;
       const value = document.createElement("div");
       value.className = "tooltip-basket-value";
       const amount = document.createElement("b");
-      amount.textContent = signed(d.series[i].values[j]);
-      amount.className = d.series[i].values[j] >= 0 ? "green" : "red";
+      amount.textContent = signed(d.series[i].values[b.index]);
+      amount.className = d.series[i].values[b.index] >= 0 ? "green" : "red";
       const change = document.createElement("small");
       change.className = "tooltip-basket-change";
       change.textContent = b.buyValue
-        ? `${d.series[i].values[j] >= 0 ? "+" : ""}${((d.series[i].values[j] / b.buyValue) * 100).toFixed(2)}%`
+        ? `${d.series[i].values[b.index] >= 0 ? "+" : ""}${((d.series[i].values[b.index] / b.buyValue) * 100).toFixed(2)}%`
         : "—";
       value.append(amount, change);
       row.append(label, value);

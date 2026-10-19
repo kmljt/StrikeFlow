@@ -3157,8 +3157,8 @@
       .selection-check{width:14px;height:14px;flex:0 0 auto}
       .content{margin-top:16px;padding:18px;border-radius:16px}
       .mini-plot,.main-plot{padding-inline:0}
-      .mini-chart-wrap{height:190px;border-radius:11px}
-      .percent-plot .mini-chart-wrap{height:230px}
+      .mini-chart-wrap,
+      .percent-plot .mini-chart-wrap,
       .chart-wrap{height:clamp(320px,38vw,460px);border-radius:12px}
       .chart-tooltip{max-width:min(320px,calc(100vw - 40px));padding:10px 12px;box-shadow:0 12px 36px #000a}
       .basket-legend{gap:8px 10px}
@@ -3202,7 +3202,9 @@
         .session{justify-content:flex-end;align-self:flex-end;width:max-content}
         .controls{grid-template-columns:repeat(2,minmax(0,1fr))}
         .basket-control-actions{grid-column:1/-1;justify-self:end}
-        .chart-wrap{height:360px}
+        .chart-wrap,
+        .mini-chart-wrap,
+        .percent-plot .mini-chart-wrap{height:clamp(300px,44vw,360px)}
       }
       @media(max-width:620px){
         .wrap{width:calc(100% - 28px);padding:18px 0 34px}
@@ -3240,9 +3242,9 @@
         .position-total>span{font-size:8px}
         .position-total>strong{font-size:11px}
         .content{padding:13px}
-        .chart-wrap{height:300px}
-        .mini-chart-wrap{height:165px}
-        .percent-plot .mini-chart-wrap{height:190px}
+        .chart-wrap,
+        .mini-chart-wrap,
+        .percent-plot .mini-chart-wrap{height:280px}
         .scenario-chart-wrap{height:220px}
         .basket-legend span{font-size:10px}
         .legend{flex-wrap:wrap}
@@ -3552,8 +3554,8 @@
         <form id="strangle-form" novalidate>
           <h2>Add a strangle</h2>
           <div id="strangle-mode-tabs" role="group" aria-label="Strangle type">
-            <button type="button" data-strangle-mode="simple" aria-pressed="false">Simple strangle</button>
-            <button type="button" data-strangle-mode="smart" aria-pressed="true">Smart strangle</button>
+            <button type="button" data-strangle-mode="simple" aria-pressed="true">Simple strangle</button>
+            <button type="button" data-strangle-mode="smart" aria-pressed="false">Smart strangle</button>
           </div>
           <div id="strangle-smart-fields">
             <p>Choose the strike offset and total premium budget. We’ll split the budget evenly between the call and put, using the previous session’s prices.</p>
@@ -3576,11 +3578,11 @@
             </section>
           </div>
           <div id="strangle-simple-fields" hidden>
-            <p>Choose an OTM distance and lot count. We’ll add a call and put at the closest listed strikes, with the selected number of lots in each.</p>
+            <p>Choose a strike offset and lot count. Positive values target OTM; negative values target ITM.</p>
             <div class="strangle-inputs">
               <div class="field">
-                <label for="simple-strangle-otm">OTM distance · points</label>
-                <input id="simple-strangle-otm" type="number" min="0" max="10000" step="50" value="250" />
+                <label for="simple-strangle-otm">Strike offset · points</label>
+                <input id="simple-strangle-otm" type="number" min="-10000" max="10000" step="50" value="250" />
               </div>
               <div class="field">
                 <label for="simple-strangle-lots">Lots · each leg</label>
@@ -3614,6 +3616,6 @@
         >
       </div>
     </main>
-    <script src="app.js?v=simple-strangle-lots"></script>
+    <script src="app.js?v=simple-strangle-default"></script>
   </body>
 </html>
