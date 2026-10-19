@@ -111,19 +111,57 @@ function upstoxURL(route, params = {}) {
   url.search = new URLSearchParams(params).toString();
   return url;
 }
-async function upstoxHistory(instrumentKey, from, to, interval, isExpired) {
+function expiredInstrumentKey(instrumentKey, expiry) {
+  if (!expiry || instrumentKey.split("|").length > 2) return instrumentKey;
+  const [year, month, day] = expiry.split("-");
+  return `${instrumentKey}|${day}-${month}-${year}`;
+}
+async function upstoxHistory(
+  instrumentKey,
+  from,
+  to,
+  interval,
+  isExpired,
+  expiry,
+) {
   const encoded = encodeURIComponent(instrumentKey);
-  const endpoint = isExpired
-    ? upstoxURL(
-        `/expired-instruments/historical-candle/${encoded}/${interval}/${to}/${from}`,
-      )
+  const endpoint = from === todayIST() && interval !== "day"
+      ? new URL(
+          `https://api.upstox.com/v3/historical-candle/intraday/${encoded}/minutes/${Number.parseInt(interval, 10)}`,
+        )
     : interval === "day"
       ? upstoxURL(`/historical-candle/${encoded}/day/${to}/${from}`)
       : new URL(
           `https://api.upstox.com/v3/historical-candle/${encoded}/minutes/${Number.parseInt(interval, 10)}/${to}/${from}`,
         );
-  const data = await upstoxGet(endpoint);
-  return { candles: data?.candles || [] };
+  let candles = [];
+  try {
+    const data = await upstoxGet(endpoint);
+    candles = data?.candles || [];
+  } catch (error) {
+    if (!isExpired && interval !== "1minute") throw error;
+  }
+  if (candles.length) return { candles };
+
+  // V2 can still have 1-minute candles when V3 has no rows for a contract.
+  if (interval === "1minute" && from !== todayIST()) {
+    try {
+      const legacy = await upstoxGet(
+        upstoxURL(`/historical-candle/${encoded}/${interval}/${to}/${from}`),
+      );
+      candles = legacy?.candles || [];
+      if (candles.length) return { candles };
+    } catch (error) {
+      if (!isExpired) throw error;
+    }
+  }
+  if (!isExpired) return { candles: [] };
+  const expiredData = await upstoxGet(
+    upstoxURL(
+      `/expired-instruments/historical-candle/${encodeURIComponent(expiredInstrumentKey(instrumentKey, expiry))}/${interval}/${to}/${from}`,
+    ),
+  );
+  return { candles: expiredData?.candles || [] };
 }
 async function resolveNiftyOption(expiry, strike, type) {
   const contracts = await niftyContracts(expiry);
@@ -142,33 +180,39 @@ async function resolveNiftyOption(expiry, strike, type) {
 }
 async function niftyContracts(expiry) {
   const expired = expiry < todayIST();
-  return (
-    (await upstoxGet(
-      upstoxURL(
-        expired ? "/expired-instruments/option/contract" : "/option/contract",
-        { instrument_key: "NSE_INDEX|Nifty 50", expiry_date: expiry },
-      ),
-    )) || []
-  );
+  const params = { instrument_key: "NSE_INDEX|Nifty 50", expiry_date: expiry };
+  try {
+    const currentContracts = await upstoxGet(upstoxURL("/option/contract", params));
+    if (currentContracts?.length || !expired) return currentContracts || [];
+  } catch (error) {
+    if (!expired) throw error;
+  }
+  return (await upstoxGet(upstoxURL("/expired-instruments/option/contract", params))) || [];
 }
-async function priorClose(instrumentKey, day, expired = false) {
+async function priorClose(instrumentKey, day, expired = false, expiry) {
   const from = new Date(`${day}T00:00:00Z`);
   from.setUTCDate(from.getUTCDate() - 14);
   const fromDay = from.toISOString().slice(0, 10),
     encoded = encodeURIComponent(instrumentKey);
-  const endpoint = expired
-    ? upstoxURL(
-        `/expired-instruments/historical-candle/${encoded}/day/${addCalendarDays(day, 1)}/${fromDay}`,
-      )
-    : upstoxURL(
-        `/historical-candle/${encoded}/day/${addCalendarDays(day, 1)}/${fromDay}`,
-      );
-  const data = await upstoxGet(endpoint),
-    candles = (data?.candles || [])
+  const candlesFor = (data) => (data?.candles || [])
       .map((c) => ({ date: String(c[0]).slice(0, 10), close: Number(c[4]) }))
       .filter((c) => c.date < day && Number.isFinite(c.close))
       .sort((a, b) => a.date.localeCompare(b.date));
-  return candles.at(-1) || null;
+  try {
+    const data = await upstoxGet(
+      upstoxURL(`/historical-candle/${encoded}/day/${addCalendarDays(day, 1)}/${fromDay}`),
+    );
+    const prior = candlesFor(data).at(-1);
+    if (prior || !expired) return prior || null;
+  } catch (error) {
+    if (!expired) throw error;
+  }
+  const data = await upstoxGet(
+    upstoxURL(
+      `/expired-instruments/historical-candle/${encodeURIComponent(expiredInstrumentKey(instrumentKey, expiry))}/day/${addCalendarDays(day, 1)}/${fromDay}`,
+    ),
+  );
+  return candlesFor(data).at(-1) || null;
 }
 function addCalendarDays(day, count) {
   const date = new Date(`${day}T00:00:00Z`);
@@ -250,7 +294,7 @@ async function smartPickOption(expiry, day, otmPoints, budget, type) {
   const pricedCandidates = await Promise.all(
     candidates.map(async (contract) => ({
       contract,
-      premium: await priorClose(contract.instrument_key, day, expired),
+      premium: await priorClose(contract.instrument_key, day, expired, expiry),
     })),
   );
   const choices = [];
@@ -307,12 +351,15 @@ async function smartPickOption(expiry, day, otmPoints, budget, type) {
   );
 }
 function todayIST() {
+  return dateIST(new Date());
+}
+function dateIST(value) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     timeZone: "Asia/Kolkata",
-  }).formatToParts(new Date());
+  }).formatToParts(value);
   return `${parts.find((x) => x.type === "year").value}-${parts.find((x) => x.type === "month").value}-${parts.find((x) => x.type === "day").value}`;
 }
 async function routeRequest(req, res) {
@@ -460,10 +507,35 @@ async function routeRequest(req, res) {
         contract.instrument_key,
         day,
         expiry < todayIST(),
+        expiry,
       );
+      let currentPrice = null;
+      if (day === todayIST()) {
+        const quoteURL = new URL("https://api.upstox.com/v3/market-quote/ohlc");
+        quoteURL.search = new URLSearchParams({
+          instrument_key: contract.instrument_key,
+          interval: "I1",
+        }).toString();
+        const quoteData = await upstoxGet(
+            quoteURL,
+          ),
+          quote = Object.values(quoteData || {}).find(
+            (item) => item?.instrument_token === contract.instrument_key,
+          ) || Object.values(quoteData || {})[0],
+          liveCandleTime = Number(quote?.live_ohlc?.ts),
+          tradedToday = Number.isFinite(liveCandleTime) &&
+            liveCandleTime > 0 &&
+            dateIST(new Date(liveCandleTime)) === day,
+          lastPrice = Number(quote?.last_price);
+        if (tradedToday && Number.isFinite(lastPrice) && lastPrice > 0) {
+          currentPrice = lastPrice;
+        }
+      }
       return send(res, 200, {
-        premiumClose: premium?.close ?? null,
+        premiumPrice: premium?.close ?? null,
         premiumDate: premium?.date ?? null,
+        currentPrice,
+        currentDate: currentPrice === null ? null : day,
         lotSize: Number(contract.lot_size) || 65,
       });
     } catch (error) {
@@ -532,6 +604,82 @@ async function routeRequest(req, res) {
       return send(res, 502, { error: e.message });
     }
   }
+  if (url.pathname === "/api/upstox/nifty-simple-strangle") {
+    if (!hasUpstoxToken())
+      return send(res, 401, {
+        error: "Connect Upstox first to find NIFTY 50 option strikes.",
+      });
+    const expiry = url.searchParams.get("expiry"),
+      day = url.searchParams.get("day"),
+      otmPoints = Number(url.searchParams.get("otmPoints")),
+      lots = Number(url.searchParams.get("lots"));
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(expiry || "") ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(day || "") ||
+      expiry < day ||
+      !Number.isInteger(otmPoints) ||
+      otmPoints < 0 ||
+      otmPoints > 10000 ||
+      otmPoints % 50 !== 0 ||
+      !Number.isInteger(lots) ||
+      lots < 1 ||
+      lots > 10000
+    )
+      return send(res, 400, {
+        error: "Enter a valid expiry, OTM distance, and lot count.",
+      });
+    try {
+      const [reference, contracts] = await Promise.all([
+        priorClose("NSE_INDEX|Nifty 50", day),
+        niftyContracts(expiry),
+      ]);
+      if (!reference)
+        throw new Error("Could not find NIFTY 50’s previous-session close for that day.");
+      const expired = expiry < todayIST();
+      const pickLeg = async (type) => {
+        const target = Math.round(
+          (reference.close + (type === "CE" ? otmPoints : -otmPoints)) / 50,
+        ) * 50;
+        const contract = contracts.find((item) =>
+          item.instrument_type === type &&
+          Number(item.strike_price) === target,
+        );
+        if (!contract)
+          throw new Error(`No ${type === "CE" ? "call" : "put"} contract is listed at ${target}.`);
+        const premium = await priorClose(contract.instrument_key, day, expired, expiry),
+          strike = Number(contract.strike_price),
+          actualOTM = Math.round(type === "CE"
+            ? strike - reference.close
+            : reference.close - strike);
+        return {
+          type,
+          strike,
+          lots,
+          actualOTM,
+          premiumClose: premium?.close ?? null,
+          premiumDate: premium?.date ?? null,
+          estimatedCost: premium?.close > 0
+            ? premium.close * (Number(contract.lot_size) || 65) * lots
+            : null,
+        };
+      };
+      const [call, put] = await Promise.all([pickLeg("CE"), pickLeg("PE")]);
+      return send(res, 200, {
+        expiry,
+        day,
+        otmPoints,
+        referenceClose: reference.close,
+        referenceDate: reference.date,
+        call,
+        put,
+        estimatedCost: call.estimatedCost === null || put.estimatedCost === null
+          ? null
+          : call.estimatedCost + put.estimatedCost,
+      });
+    } catch (error) {
+      return send(res, 502, { error: error.message });
+    }
+  }
   if (url.pathname === "/api/upstox/nifty-contract") {
     if (!hasUpstoxToken())
       return send(res, 401, {
@@ -564,6 +712,7 @@ async function routeRequest(req, res) {
       from = url.searchParams.get("from"),
       to = url.searchParams.get("to"),
       interval = url.searchParams.get("interval"),
+      expiry = url.searchParams.get("expiry"),
       expired = url.searchParams.get("expired") === "true";
     if (
       !instrumentKey ||
@@ -572,6 +721,7 @@ async function routeRequest(req, res) {
       !/^[\w| -]+$/.test(instrumentKey) ||
       !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(from || "") ||
       !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(to || "") ||
+      (expiry && !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(expiry)) ||
       !["1minute", "5minute", "15minute", "30minute", "day"].includes(
         interval || "",
       )
@@ -581,7 +731,7 @@ async function routeRequest(req, res) {
       return send(
         res,
         200,
-        await upstoxHistory(instrumentKey, from, to, interval, expired),
+        await upstoxHistory(instrumentKey, from, to, interval, expired, expiry),
       );
     } catch (e) {
       return send(res, 502, { error: e.message });

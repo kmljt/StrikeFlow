@@ -3068,6 +3068,11 @@
       #strangle-form{display:grid;gap:16px;padding:24px}
       #strangle-form h2{margin:0;font-size:22px;letter-spacing:-.04em}
       #strangle-form>p{margin:0;color:#92999f;font-size:13px;line-height:1.5}
+      #strangle-mode-tabs{display:flex;gap:4px;padding:4px;border:1px solid #25282c;border-radius:11px;background:#050607}
+      #strangle-mode-tabs button{flex:1;min-height:38px;border:1px solid transparent;border-radius:8px;background:transparent;color:#92999f;font:650 12px system-ui;cursor:pointer}
+      #strangle-mode-tabs button[aria-pressed="true"]{background:color-mix(in srgb,var(--site-accent) 12%,#111214);border-color:color-mix(in srgb,var(--site-accent) 28%,#24272b);color:var(--site-accent)}
+      #strangle-smart-fields[hidden],#strangle-simple-fields[hidden]{display:none!important}
+      #strangle-smart-fields,#strangle-simple-fields{display:grid;gap:16px}
       .strangle-inputs{display:grid;grid-template-columns:1fr 1fr;gap:12px}
       .strangle-inputs .field{min-width:0}
       .strangle-inputs input{width:100%;height:48px;padding:0 13px;border:1px solid #30353a;border-radius:10px;background:#050607;color:#f0f2f4;font:inherit}
@@ -3082,6 +3087,15 @@
       .strangle-total strong{color:var(--green)}
       .strangle-total strong.over{color:var(--red)}
       #strangle-form .strangle-actions{display:flex;justify-content:flex-end;gap:9px;margin:0}
+      #simple-strangle-result{display:grid;gap:10px;padding:14px;border:1px solid color-mix(in srgb,var(--site-accent) 35%,#25282c);border-radius:12px;background:linear-gradient(135deg,color-mix(in srgb,var(--site-accent) 8%,#0a0b0c),#08090a 65%)}
+      #simple-strangle-result[hidden]{display:none!important}
+      #simple-strangle-summary{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+      .simple-strangle-leg{display:grid;gap:5px;padding:12px;border:1px solid #282c30;border-radius:9px;background:#090a0c}
+      .simple-strangle-leg span{color:#92999f;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+      .simple-strangle-leg strong{font-size:15px;font-variant-numeric:tabular-nums}
+      .simple-strangle-leg small{color:#adb4ba;font-size:11px;font-variant-numeric:tabular-nums}
+      #simple-strangle-total{display:flex;justify-content:space-between;gap:12px;padding-top:10px;border-top:1px solid #282c30;font-size:12px}
+      #simple-strangle-total strong{font-variant-numeric:tabular-nums}
       @media(max-width:760px){.controls{grid-template-columns:repeat(2,minmax(0,1fr))}.basket-control-actions{grid-column:1/-1;justify-self:stretch}.basket-control-actions .button{width:auto;flex:1}}
       @media(max-width:520px){.basket-control-actions{display:grid;grid-template-columns:1fr 1fr;grid-column:1/-1}.basket-control-actions .button{width:100%;padding-inline:8px;font-size:12px}#strangle-form{padding:18px}.strangle-inputs,.strangle-legs{grid-template-columns:1fr}}
       #option-submit{min-width:116px}
@@ -3536,26 +3550,52 @@
       </dialog>
       <dialog id="strangle-dialog">
         <form id="strangle-form" novalidate>
-          <h2>Add a smart strangle</h2>
-          <p>Choose the strike offset and total premium budget. We’ll split the budget evenly between the call and put, using the previous session’s prices.</p>
-          <div class="strangle-inputs">
-            <div class="field">
-              <label for="strangle-otm">Strike offset · points</label>
-              <input id="strangle-otm" type="number" min="-10000" max="10000" step="50" value="250" />
+          <h2>Add a strangle</h2>
+          <div id="strangle-mode-tabs" role="group" aria-label="Strangle type">
+            <button type="button" data-strangle-mode="simple" aria-pressed="false">Simple strangle</button>
+            <button type="button" data-strangle-mode="smart" aria-pressed="true">Smart strangle</button>
+          </div>
+          <div id="strangle-smart-fields">
+            <p>Choose the strike offset and total premium budget. We’ll split the budget evenly between the call and put, using the previous session’s prices.</p>
+            <div class="strangle-inputs">
+              <div class="field">
+                <label for="strangle-otm">Strike offset · points</label>
+                <input id="strangle-otm" type="number" min="-10000" max="10000" step="50" value="250" />
+              </div>
+              <div class="field">
+                <label for="strangle-budget">Total premium budget · ₹</label>
+                <input id="strangle-budget" type="number" min="100" max="10000000" step="100" value="6000" />
+              </div>
             </div>
-            <div class="field">
-              <label for="strangle-budget">Total premium budget · ₹</label>
-              <input id="strangle-budget" type="number" min="100" max="10000000" step="100" value="6000" />
+            <section id="strangle-result" class="strangle-result" hidden>
+              <div class="strangle-legs">
+                <div class="strangle-leg"><span>Call · CE</span><strong id="strangle-call-title"></strong><small id="strangle-call-detail"></small></div>
+                <div class="strangle-leg"><span>Put · PE</span><strong id="strangle-put-title"></strong><small id="strangle-put-detail"></small></div>
+              </div>
+              <div class="strangle-total"><span id="strangle-total-label"></span><strong id="strangle-total-value"></strong></div>
+            </section>
+          </div>
+          <div id="strangle-simple-fields" hidden>
+            <p>Choose an OTM distance and lot count. We’ll add a call and put at the closest listed strikes, with the selected number of lots in each.</p>
+            <div class="strangle-inputs">
+              <div class="field">
+                <label for="simple-strangle-otm">OTM distance · points</label>
+                <input id="simple-strangle-otm" type="number" min="0" max="10000" step="50" value="250" />
+              </div>
+              <div class="field">
+                <label for="simple-strangle-lots">Lots · each leg</label>
+                <input id="simple-strangle-lots" type="number" min="1" max="10000" step="1" value="1" />
+              </div>
             </div>
+            <section id="simple-strangle-result" hidden>
+              <div id="simple-strangle-summary">
+                <div class="simple-strangle-leg"><span>Call</span><strong id="simple-call-title"></strong><small id="simple-call-detail"></small></div>
+                <div class="simple-strangle-leg"><span>Put</span><strong id="simple-put-title"></strong><small id="simple-put-detail"></small></div>
+              </div>
+              <div id="simple-strangle-total"><span>Estimated debit · previous closes</span><strong id="simple-total-value"></strong></div>
+            </section>
           </div>
           <div id="strangle-error" class="error" hidden></div>
-          <section id="strangle-result" class="strangle-result" hidden>
-            <div class="strangle-legs">
-              <div class="strangle-leg"><span>Call · CE</span><strong id="strangle-call-title"></strong><small id="strangle-call-detail"></small></div>
-              <div class="strangle-leg"><span>Put · PE</span><strong id="strangle-put-title"></strong><small id="strangle-put-detail"></small></div>
-            </div>
-            <div class="strangle-total"><span id="strangle-total-label"></span><strong id="strangle-total-value"></strong></div>
-          </section>
           <div class="strangle-actions">
             <button id="strangle-cancel" class="button secondary" type="button">Cancel</button>
             <button id="strangle-add" class="button" type="button" disabled>Add strangle</button>
@@ -3574,6 +3614,6 @@
         >
       </div>
     </main>
-    <script src="app.js?v=manual-option-controls"></script>
+    <script src="app.js?v=simple-strangle-lots"></script>
   </body>
 </html>

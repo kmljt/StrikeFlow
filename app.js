@@ -1,4 +1,5 @@
 const UPSTOX_TOKEN_KEY = "strikeflow-upstox-token";
+const LAST_TRADING_DAY_KEY = "pnl-last-trading-day";
 const nativeFetch = window.fetch.bind(window);
 window.fetch = (input, init = {}) => {
   const raw = typeof input === "string" ? input : input.url;
@@ -46,6 +47,16 @@ let lastDay = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
   .slice(0, 10);
 lastDay = addDays(lastDay, -1);
 while (isMarketClosed(lastDay)) lastDay = addDays(lastDay, -1);
+const savedTradingDay = localStorage.getItem(LAST_TRADING_DAY_KEY),
+  savedTradingDate = /^\d{4}-\d{2}-\d{2}$/.test(savedTradingDay || "")
+    ? new Date(`${savedTradingDay}T00:00:00Z`)
+    : null;
+if (
+  savedTradingDate &&
+  Number.isFinite(savedTradingDate.getTime()) &&
+  savedTradingDay <= todayLocal &&
+  savedTradingDate.toISOString().slice(0, 10) === savedTradingDay
+) lastDay = savedTradingDay;
 dateField.value = lastDay;
 $("date-label").textContent = formatDate(dateField.value);
 function applySiteAccent(color) {
@@ -167,6 +178,9 @@ let smartPickRequest = 0;
 let smartPickDebounce = null;
 let smartStrangleRequest = 0;
 let smartStrangleDebounce = null;
+let simpleStrangleRequest = 0;
+let simpleStrangleDebounce = null;
+window.strangleMode = "smart";
 let optionContractsRequest = 0;
 let manualOptionPreviewRequest = 0;
 let manualOptionPreviewDebounce = null;
@@ -174,15 +188,26 @@ window.smartStrangleResult = null;
 $("new-basket").addEventListener("click", addBasket);
 $("new-strangle").addEventListener("click", openSmartStrangle);
 $("strangle-cancel").addEventListener("click", () => $("strangle-dialog").close());
-$("strangle-add").addEventListener("click", addSmartStrangle);
+$("strangle-add").addEventListener("click", () => {
+  if (window.strangleMode === "simple") addSimpleStrangle();
+  else addSmartStrangle();
+});
 $("strangle-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  findSmartStrangle();
+  if (window.strangleMode === "simple") findSimpleStrangle();
+  else findSmartStrangle();
 });
+document.querySelectorAll("[data-strangle-mode]").forEach((button) =>
+  button.addEventListener("click", () => setStrangleMode(button.dataset.strangleMode)),
+);
 for (const id of ["strangle-otm", "strangle-budget"])
   $(id).addEventListener("input", scheduleSmartStrangle);
+for (const id of ["simple-strangle-otm", "simple-strangle-lots"])
+  $(id).addEventListener("input", scheduleSimpleStrangle);
 $("expiry").addEventListener("change", scheduleSmartStrangle);
+$("expiry").addEventListener("change", scheduleSimpleStrangle);
 dateField.addEventListener("change", scheduleSmartStrangle);
+dateField.addEventListener("change", scheduleSimpleStrangle);
 $("basket-dialog").addEventListener("close", finishBasketDialog);
 $("option-cancel").addEventListener("click", () => $("option-dialog").close());
 $("option-dialog-form").addEventListener("submit", (e) => {
@@ -209,6 +234,7 @@ $("strike-input").addEventListener("change", () => {
 $("expiry").addEventListener("change", scheduleManualOptionPreview);
 $("expiry").addEventListener("change", loadOptionContracts);
 dateField.addEventListener("change", () => {
+  localStorage.setItem(LAST_TRADING_DAY_KEY, dateField.value);
   $("date-label").textContent = formatDate(dateField.value);
   invalidateResults();
   renderExpiries();
@@ -858,8 +884,12 @@ function nextBasketNumber() {
   }, 0) + 1;
 }
 function openSmartStrangle() {
+  window.strangleMode = "smart";
+  setStrangleMode("smart", false);
   window.smartStrangleResult = null;
+  window.simpleStrangleResult = null;
   $("strangle-result").hidden = true;
+  $("simple-strangle-result").hidden = true;
   $("strangle-error").hidden = true;
   $("strangle-add").disabled = true;
   $("strangle-add").textContent = "Finding picks…";
@@ -867,12 +897,26 @@ function openSmartStrangle() {
   scheduleSmartStrangle();
   $("strangle-otm").focus();
 }
+function setStrangleMode(mode, refresh = true) {
+  window.strangleMode = mode === "simple" ? "simple" : "smart";
+  document.querySelectorAll("[data-strangle-mode]").forEach((button) =>
+    button.setAttribute("aria-pressed", String(button.dataset.strangleMode === window.strangleMode)),
+  );
+  $("strangle-smart-fields").hidden = window.strangleMode !== "smart";
+  $("strangle-simple-fields").hidden = window.strangleMode !== "simple";
+  $("strangle-error").hidden = true;
+  if (refresh && $("strangle-dialog").open) {
+    if (window.strangleMode === "simple") scheduleSimpleStrangle();
+    else scheduleSmartStrangle();
+  }
+}
 function normalizeStrangleOffset(value) {
   if (!Number.isFinite(value)) return null;
   return Math.max(-10000, Math.min(10000, Math.round(value / 50) * 50));
 }
 function scheduleSmartStrangle() {
   clearTimeout(smartStrangleDebounce);
+  if (window.strangleMode !== "smart") return;
   const requestId = ++smartStrangleRequest;
   window.smartStrangleResult = null;
   $("strangle-add").disabled = true;
@@ -902,6 +946,7 @@ function scheduleSmartStrangle() {
   smartStrangleDebounce = setTimeout(() => findSmartStrangle(requestId), 400);
 }
 async function findSmartStrangle(requestId = ++smartStrangleRequest) {
+  if (window.strangleMode !== "smart") return;
   clearTimeout(smartStrangleDebounce);
   smartStrangleDebounce = null;
   const expiry = $("expiry").value,
@@ -969,7 +1014,7 @@ async function findSmartStrangle(requestId = ++smartStrangleRequest) {
 }
 function addSmartStrangle() {
   const pick = window.smartStrangleResult;
-  if (!pick || !$("strangle-dialog").open) return;
+  if (!pick || window.strangleMode !== "smart" || !$("strangle-dialog").open) return;
   const items = [pick.call, pick.put].map((leg) => ({
     expiry: pick.expiry,
     strike: Number(leg.strike),
@@ -998,6 +1043,109 @@ function addSmartStrangle() {
   renderBaskets();
   $("strangle-dialog").close();
   window.smartStrangleResult = null;
+}
+function scheduleSimpleStrangle() {
+  clearTimeout(simpleStrangleDebounce);
+  const requestId = ++simpleStrangleRequest;
+  window.simpleStrangleResult = null;
+  $("strangle-add").disabled = true;
+  $("strangle-add").textContent = "Finding strikes…";
+  $("simple-strangle-result").hidden = true;
+  $("strangle-error").hidden = true;
+  if (!$("strangle-dialog").open || window.strangleMode !== "simple") return;
+  const expiry = $("expiry").value,
+    day = dateField.value,
+    input = $("simple-strangle-otm"),
+    offset = Number(input.value),
+    lots = Number($("simple-strangle-lots").value);
+  if (input.value.trim() !== "" && Number.isFinite(offset) && offset >= 0)
+    input.value = String(Math.min(10000, Math.round(offset / 50) * 50));
+  if (!expiry || expiry < day || input.value.trim() === "" || !Number.isFinite(offset) || offset < 0 || offset > 10000 || !Number.isInteger(lots) || lots < 1 || lots > 10000) {
+    if (!expiry || expiry < day) {
+      $("strangle-error").textContent = "Choose an option expiry on or after the trading day.";
+      $("strangle-error").hidden = false;
+    }
+    $("strangle-add").textContent = "Add strangle";
+    return;
+  }
+  simpleStrangleDebounce = setTimeout(() => findSimpleStrangle(requestId), 250);
+}
+async function findSimpleStrangle(requestId = ++simpleStrangleRequest) {
+  clearTimeout(simpleStrangleDebounce);
+  simpleStrangleDebounce = null;
+  if (window.strangleMode !== "simple") return;
+  const expiry = $("expiry").value,
+    day = dateField.value,
+    input = $("simple-strangle-otm"),
+    rawOffset = Number(input.value),
+    lots = Number($("simple-strangle-lots").value),
+    offset = Number.isFinite(rawOffset) && rawOffset >= 0
+      ? Math.min(10000, Math.round(rawOffset / 50) * 50)
+      : null;
+  if (!expiry || expiry < day || offset === null || input.value.trim() === "" || !Number.isInteger(lots) || lots < 1 || lots > 10000) {
+    $("strangle-add").disabled = true;
+    $("strangle-add").textContent = "Add strangle";
+    return;
+  }
+  input.value = String(offset);
+  $("strangle-add").disabled = true;
+  $("strangle-add").textContent = "Finding strikes…";
+  try {
+    const query = new URLSearchParams({ expiry, day, otmPoints: String(offset), lots: String(lots) }),
+      response = await fetch(`/api/upstox/nifty-simple-strangle?${query}`),
+      result = await response.json();
+    if (requestId !== simpleStrangleRequest || window.strangleMode !== "simple") return;
+    if (!response.ok) throw Error(result.error || "Could not find the matching call and put.");
+    window.simpleStrangleResult = result;
+    const renderLeg = (prefix, leg) => {
+      $(`simple-${prefix}-title`).textContent = `${leg.strike} ${leg.type} · ${leg.lots} lot${leg.lots === 1 ? "" : "s"}`;
+      $(`simple-${prefix}-detail`).textContent = `${Math.abs(leg.actualOTM)} points OTM · ${leg.estimatedCost === null ? "previous close unavailable" : `${formatSmartMoney(leg.estimatedCost)} total`}`;
+    };
+    renderLeg("call", result.call);
+    renderLeg("put", result.put);
+    $("simple-total-value").textContent = result.estimatedCost === null
+      ? "Unavailable"
+      : formatSmartMoney(result.estimatedCost);
+    $("simple-strangle-result").hidden = false;
+    $("strangle-error").hidden = true;
+    $("strangle-add").disabled = false;
+    $("strangle-add").textContent = result.estimatedCost === null
+      ? "Add strangle"
+      : `Add strangle · ${formatSmartMoney(result.estimatedCost)}`;
+  } catch (error) {
+    if (requestId !== simpleStrangleRequest || window.strangleMode !== "simple") return;
+    $("strangle-error").textContent = error.message || "Could not find the matching call and put.";
+    $("strangle-error").hidden = false;
+    $("strangle-add").textContent = "Add strangle";
+  }
+}
+function addSimpleStrangle() {
+  const pick = window.simpleStrangleResult;
+  if (!pick || window.strangleMode !== "simple" || !$("strangle-dialog").open) return;
+  const items = [pick.call, pick.put].map((leg) => ({
+    expiry: pick.expiry,
+    strike: Number(leg.strike),
+    optionType: leg.type,
+    lots: Number(leg.lots),
+  }));
+  if (items.some((item) => !Number.isInteger(item.strike) || !["CE", "PE"].includes(item.optionType))) {
+    $("strangle-error").textContent = "This strangle selection is no longer valid. Refresh the distance and try again.";
+    $("strangle-error").hidden = false;
+    return;
+  }
+  const basketNumber = nextBasketNumber();
+  invalidateResults();
+  state.baskets.push({
+    id: `basket-${Date.now()}`,
+    name: `Basket ${basketNumber}`,
+    customName: false,
+    enabled: true,
+    items,
+  });
+  saveState();
+  renderBaskets();
+  $("strangle-dialog").close();
+  window.simpleStrangleResult = null;
 }
 function openBasketDialog(id) {
   window.renameBasketId = id;
@@ -1646,7 +1794,7 @@ async function loadManualOptionPreview({ requestId, type, strike, lots, referenc
   const loadingLabel = document.createElement("span");
   loadingLabel.textContent = "PRICE";
   const loadingText = document.createElement("span");
-  loadingText.textContent = "Loading prior close…";
+  loadingText.textContent = "Loading option price…";
   loading.append(loadingLabel, loadingText);
   $("manual-option-preview-details").replaceChildren(loading);
   try {
@@ -1661,7 +1809,7 @@ async function loadManualOptionPreview({ requestId, type, strike, lots, referenc
     if (requestId !== manualOptionPreviewRequest) return;
     if (!response.ok) throw Error(result.error || "Could not load this option price.");
     const lotSize = Number(result.lotSize) || 65,
-      premium = Number(result.premiumClose),
+      premium = Number(result.premiumPrice),
       perLot = premium * lotSize,
       total = perLot * lots,
       actualOffset = Math.round(type === "CE" ? strike - reference : reference - strike),
@@ -1671,8 +1819,11 @@ async function loadManualOptionPreview({ requestId, type, strike, lots, referenc
           ? `${formatSmartMoney(reference)} · ${formatSmartDate(window.niftyReferenceDate)}`
           : formatSmartMoney(reference)],
         ["PREMIUM/LOT", Number.isFinite(premium) && premium > 0
-          ? `${formatSmartMoney(premium)} × ${lotSize} = ${formatSmartMoney(perLot)}`
-          : "Prior close unavailable"],
+          ? `${formatSmartMoney(premium)} × ${lotSize} = ${formatSmartMoney(perLot)} · ${formatSmartDate(result.premiumDate)} close`
+          : "Previous-session close unavailable"],
+        ...(Number(result.currentPrice) > 0
+          ? [["TODAY’S LTP", formatSmartMoney(Number(result.currentPrice))]]
+          : []),
       ];
     $("manual-option-preview-total").textContent =
       Number.isFinite(premium) && premium > 0
@@ -1731,13 +1882,21 @@ function addPosition(position = null) {
   $("error").hidden = true;
   $("option-dialog").close();
 }
-async function upstoxHistory(instrumentKey, from, to, interval, expired) {
+async function upstoxHistory(
+  instrumentKey,
+  from,
+  to,
+  interval,
+  expired,
+  expiry,
+) {
   const q = new URLSearchParams({
       instrumentKey,
       from,
       to,
       interval,
       expired: String(expired),
+      ...(expiry ? { expiry } : {}),
     }),
     r = await fetch(`/api/upstox/history?${q}`),
     j = await r.json();
@@ -1804,6 +1963,7 @@ async function calculatePosition(p, day, interval) {
         addDays(day, 1),
         interval,
         expired,
+        p.expiry,
       ),
       upstoxHistory(
         contract.instrumentKey,
@@ -1811,6 +1971,7 @@ async function calculatePosition(p, day, interval) {
         addDays(day, 1),
         "day",
         expired,
+        p.expiry,
       ),
     ]);
   if (!daily.candles?.length)
@@ -2073,43 +2234,64 @@ async function loadTrade(generation = ++requestGeneration) {
       indexPromise = loadNiftyIndex(day, interval)
         .then((points) => ({ points }))
         .catch((error) => ({ error: error.message })),
-      data = await Promise.all(
+      basketResults = await Promise.all(
         statBaskets.map(async (b) => {
-          const selected = b.items
-            .map((position, index) => ({ position, index }))
-            .filter((x) => x.position.enabled !== false);
-          const positions = await Promise.all(
-            selected.map(async (x) => ({
-              ...(await calculatePosition(x.position, day, interval)),
-              index: x.index,
-            })),
-          );
-          const buyValue = positions.reduce(
-              (sum, p) => sum + p.buy * p.multiplier,
-              0,
-            ),
-            closeValue = positions.reduce(
-              (sum, p) => sum + p.close * p.multiplier,
-              0,
-            ),
-            ending = closeValue - buyValue;
-          return {
-            id: b.id,
-            name: basketDisplayName(b),
-            enabled: b.enabled !== false,
-            color: basketLineColor(state.baskets.indexOf(b), b.accentColor),
-            positions,
-            points: combineBasket(positions),
-            buyValue,
-            closeValue,
-            ending,
-            percent: buyValue ? (ending / buyValue) * 100 : 0,
-          };
+          try {
+            const selected = b.items
+                .map((position, index) => ({ position, index }))
+                .filter((x) => x.position.enabled !== false),
+              positions = await Promise.all(
+                selected.map(async (x) => ({
+                  ...(await calculatePosition(x.position, day, interval)),
+                  index: x.index,
+                })),
+              ),
+              buyValue = positions.reduce(
+                (sum, p) => sum + p.buy * p.multiplier,
+                0,
+              ),
+              closeValue = positions.reduce(
+                (sum, p) => sum + p.close * p.multiplier,
+                0,
+              ),
+              ending = closeValue - buyValue;
+            return {
+              value: {
+                id: b.id,
+                name: basketDisplayName(b),
+                enabled: b.enabled !== false,
+                color: basketLineColor(
+                  state.baskets.indexOf(b),
+                  b.accentColor,
+                ),
+                positions,
+                points: combineBasket(positions),
+                buyValue,
+                closeValue,
+                ending,
+                percent: buyValue ? (ending / buyValue) * 100 : 0,
+              },
+            };
+          } catch (error) {
+            return { error, basket: b };
+          }
         }),
-      );
+      ),
+      data = basketResults.flatMap((result) =>
+        result.value ? [result.value] : [],
+      ),
+      unavailableBaskets = basketResults.filter((result) => result.error);
     if (generation !== requestGeneration) return;
     const indexResult = await indexPromise;
     if (generation !== requestGeneration) return;
+    if (unavailableBaskets.length) {
+      const names = unavailableBaskets
+        .map((result) => basketDisplayName(result.basket))
+        .join(", ");
+      showError(
+        `${names} could not be priced at ${interval.replace("minute", "-minute ")}resolution and were left out of the P&L charts. ${unavailableBaskets[0].error.message}`,
+      );
+    }
     const basketVols = data
         .flatMap((b) => {
           const basket = state.baskets.find((x) => x.id === b.id);
@@ -2158,6 +2340,29 @@ async function loadTrade(generation = ++requestGeneration) {
       ]),
     );
     renderBaskets();
+    if (!data.length) {
+      $("pnl-plot").hidden = true;
+      $("percent-plot").hidden = true;
+      const times = (indexResult.points || []).map((point) => point.t),
+        xRange = times.length
+          ? { start: times[0], end: times.at(-1) }
+          : { start: 0, end: 0 };
+      window.chartXRange = xRange;
+      $("title").textContent = "Options P&L";
+      $("dates").textContent = formatDate(day);
+      $("chart-range").textContent = times.length
+        ? `${time(times[0])} – ${time(times.at(-1))} IST · ${interval.replace("minute", "-minute")}`
+        : "NIFTY 50 data unavailable";
+      $("output").classList.remove("loading");
+      window.chartData = null;
+      window.miniChartData = {
+        index: indexResult,
+        percent: { times, series: [] },
+        xRange,
+      };
+      drawMiniPlots(window.miniChartData);
+      return;
+    }
     if (!chartBaskets.length) {
       $("output").hidden = true;
       $("output").classList.remove("loading");
