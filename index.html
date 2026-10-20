@@ -3154,15 +3154,12 @@
         .basket:hover,
         .basket:has(.scenario-control:active),
         .basket:has(.scenario-control:focus) {
-          background: linear-gradient(
-            120deg,
-            color-mix(in srgb, var(--basket-color) 6%, #090a0c),
-            #060708 46%
-          );
-          box-shadow:
-            0 12px 34px #0008,
-            0 0 24px color-mix(in srgb, var(--basket-color) 8%, transparent);
+          background: #070809;
+          box-shadow: 0 12px 34px #0008;
+          -webkit-tap-highlight-color: transparent;
         }
+        .basket,
+        .basket * { -webkit-tap-highlight-color: transparent; }
       }
       .basket-head{gap:9px}
       .basket-head h2{font-size:15px}

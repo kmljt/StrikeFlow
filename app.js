@@ -2953,7 +2953,7 @@ function showScenarioHover(e, ref) {
   ref.hoverPoint = point;
   tooltip.textContent = `NIFTY ${Math.round(spot).toLocaleString("en-IN")}  ·  ${signed(pnl)}`;
   tooltip.hidden = false;
-  tooltip.style.left = `${x > rect.width * 0.65 ? Math.max(8, x - tooltip.offsetWidth - 12) : Math.min(rect.width - tooltip.offsetWidth - 8, x + 12)}px`;
+  tooltip.style.left = "8px";
   tooltip.style.top = "8px";
   drawScenarioChart(
     ref.canvas,
