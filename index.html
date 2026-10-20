@@ -2660,7 +2660,7 @@
       .scenario-title span,
       .scenario-note {
         color: #7f8992;
-        font-size: 11px;
+        font-size: 10px;
       }
       .scenario-controls {
         display: flex;
@@ -2687,8 +2687,29 @@
         transform: scale(0.96);
       }
       .scenario-note {
-        margin: 4px 0 9px;
+        margin: 2px 0 6px;
+        line-height: 1.4;
       }
+      .scenario-assumptions{
+        display:grid;
+        gap:8px;
+        margin:3px 0 9px;
+        padding:10px 12px;
+        border:1px solid #252a30;
+        border-left:2px solid var(--green);
+        border-radius:8px;
+        background:linear-gradient(100deg,color-mix(in srgb,var(--green) 5%,#0a0c0e),#0a0c0e 58%);
+      }
+      .scenario-assumption-heading{display:flex;align-items:baseline;gap:9px;min-width:0}
+      .scenario-assumption-tag{color:var(--green);font-size:9px;font-weight:750;letter-spacing:.13em;white-space:nowrap}
+      .scenario-assumption-heading strong{color:#dce2e6;font-size:12px;font-weight:650}
+      .scenario-assumption-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+      .scenario-assumption-item{display:grid;align-content:start;gap:3px;min-width:0}
+      .scenario-assumption-item>span{color:#838d95;font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+      .scenario-assumption-item>strong{color:#c6cdd2;font-size:11px;font-weight:550;line-height:1.35;overflow-wrap:anywhere}
+      .scenario-assumption-item>strong.is-profit{color:var(--green)}
+      .scenario-assumption-item>strong.is-loss{color:var(--red)}
+      @media(max-width:620px){.scenario-assumptions{gap:9px;padding:10px}.scenario-assumption-heading strong{font-size:13px}.scenario-assumption-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 12px}.scenario-assumption-item>span{font-size:10px}.scenario-assumption-item>strong{font-size:12px}}
       .scenario-chart-wrap {
         position: relative;
         height: 250px;
@@ -3113,6 +3134,9 @@
       .session-divider{height:20px}
       .provider-status{min-height:34px}
       .controls{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:14px;padding:18px}
+      .controls{grid-template-columns:minmax(0,1.15fr) minmax(145px,.75fr) minmax(0,1fr) auto}
+      .date-field,.interval-field,.expiry-field{min-width:0}
+      @media(max-width:760px){.controls{grid-template-columns:minmax(0,1fr) minmax(0,.9fr)}.expiry-field,.basket-control-actions{grid-column:1/-1}}
       .field label{margin-left:1px;color:#9da5ad;font-size:10px;letter-spacing:.11em}
       .field input,.field select,.date-display,.strangle-inputs input{height:46px;border-color:#2b3036;background:#050607;border-radius:10px;transition:border-color .16s ease,box-shadow .16s ease,background .16s ease}
       .field input:hover,.field select:hover,.date-display:hover,.strangle-inputs input:hover{border-color:#41474e}
@@ -3173,8 +3197,8 @@
       .scenario-chart-wrap{height:clamp(220px,28vw,320px);border-radius:11px}
       .mini-empty,.chart-empty{padding:20px;color:#9aa2aa;font-size:12px}
       .foot{margin-top:32px;padding-top:16px;border-top:1px solid #171a1e;color:#737b83;font-size:9px;letter-spacing:.12em}
-      .foot a{color:#b5bdc5;text-underline-offset:3px}
-      .foot a:hover{color:var(--site-accent)}
+      .foot a{color:var(--site-accent);text-underline-offset:3px;transition:color .15s ease}
+      .foot a:hover{color:color-mix(in srgb,var(--site-accent) 76%,#fff)}
       dialog{max-height:min(92vh,900px);overflow:auto;overscroll-behavior:contain;scrollbar-color:#343941 #090a0c}
       #token-dialog form,#basket-dialog form,#option-dialog form,#strangle-form{gap:16px}
       #token-dialog form{padding:26px}
@@ -3444,6 +3468,48 @@
       #option-dialog form .manual-option-preview,#option-dialog form .smart-result{transition:opacity .14s ease}
       #option-dialog form .manual-option-preview.is-updating,#option-dialog form .smart-result.is-updating,#strangle-dialog .strangle-result.is-updating,#strangle-dialog #simple-strangle-result.is-updating{opacity:.6;pointer-events:none}
       @media(max-width:760px){#option-dialog form .smart-result{min-height:245px}#strangle-dialog .strangle-result{min-height:205px}#strangle-dialog #simple-strangle-result{min-height:175px}}
+      @media(max-width:620px){
+        .session{display:flex;align-self:flex-end;align-items:center;justify-content:flex-end;gap:7px;width:max-content;max-width:100%;padding:7px 9px}
+        .session .provider-status{width:max-content;max-width:100%;min-height:36px;padding:0 12px}
+        .session .theme-picker{display:inline-flex;align-items:center;gap:5px;min-width:66px;padding:6px 8px}
+        .session .theme-picker>span:nth-child(2){display:inline!important;font-size:12px!important}
+        .session-divider{display:block;height:20px}
+        .controls{grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr)}
+        .expiry-field,.basket-control-actions{grid-column:1/-1}
+        .basket-control-actions{display:grid;grid-auto-flow:column;grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-column:1/-1;gap:8px;width:100%}
+        .basket-control-actions .button{width:100%;min-width:0;min-height:44px;padding-inline:8px;white-space:normal}
+        .hero p{font-size:16px}
+        .session>label:not(.theme-picker){font-size:14px}
+        .session select{font-size:15px}
+        .session .provider-status,.session .theme-picker{font-size:14px}
+        .ticker h2{font-size:16px}
+        .subline{font-size:14px}
+        .mini-plot h3,.main-plot h3{font-size:13px}
+        .basket-legend span{font-size:13px}
+        .basket-legend .legend-change,.legend{font-size:12px}
+        .field label{font-size:12px;letter-spacing:.06em}
+        .basket-control-actions .button{font-size:14px}
+        .basket-head h2{font-size:16px}
+        .basket-head .tag{font-size:12px}
+        .basket-head>span:not(.tag):not(.spacer){font-size:12px!important}
+        .basket-head>strong{font-size:14px!important}
+        .basket-metrics span,.performance-stat>span{font-size:11px}
+        .basket-metrics strong,.performance-stat>strong{font-size:15px}
+        .performance-stat>small{font-size:12px}
+        .instrument-info>span{font-size:14px}
+        .instrument-info small{font-size:12px}
+        .basket-item>.edit-item,.basket-item>.remove-item{font-size:12px}
+        .chart-tooltip{font-size:14px}
+        .foot{font-size:9px;letter-spacing:.08em;line-height:1.4}
+        #token-dialog p,#strangle-form>p{font-size:15px}
+        #option-dialog form .manual-option-preview-row span:first-child,#option-dialog form .manual-option-total span{font-size:12px}
+        #option-dialog form .manual-option-preview-row span:last-child{font-size:14px}
+        #option-dialog form .smart-result-row{font-size:15px}
+        #option-dialog form .smart-result-row span:first-child{font-size:12px}
+        #option-dialog form .smart-result-row span:last-child{font-size:15px}
+        .strangle-leg small,.simple-strangle-leg small{font-size:14px}
+        .error{font-size:15px}
+      }
       @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
     </style>
   </head>
@@ -3461,14 +3527,7 @@
           <p>Track basket performance through the trading day.</p>
         </div>
         <div class="session">
-          <span class="session-dot">●</span
-          ><label for="interval">Price interval</label
-          ><select id="interval" aria-label="Price interval">
-            <option value="1minute">1 minute</option>
-            <option value="5minute" selected>5 minutes</option>
-            <option value="15minute">15 minutes</option>
-            <option value="30minute">30 minutes</option></select
-          ><button id="upstox-status" class="provider-status" type="button">
+          <button id="upstox-status" class="provider-status" type="button">
             Connect Upstox</button
           ><span class="session-divider"></span
           ><label class="theme-picker" title="Choose website accent color"
@@ -3542,44 +3601,53 @@
       </div>
       <section class="card controls" aria-label="Basket controls">
         <div class="field date-field">
-          <label for="date-open">Trading day</label>
-          <div class="date-display">
-            <button
-              id="date-open"
-              type="button"
-              aria-label="Choose trading day"
-            >
-              <span id="date-label"></span
-              ><span aria-hidden="true">▣</span></button
-            ><input
-              id="date"
-              type="date"
-              aria-label="Trading day"
-              tabindex="-1"
-            />
-            <div id="date-picker" class="date-picker" hidden>
-              <div class="calendar-head">
-                <button
-                  id="month-prev"
-                  type="button"
-                  aria-label="Previous month"
-                >
-                  ‹</button
-                ><strong id="month-label"></strong
-                ><button id="month-next" type="button" aria-label="Next month">
-                  ›
-                </button>
+            <label for="date-open">Trading day</label>
+            <div class="date-display">
+              <button
+                id="date-open"
+                type="button"
+                aria-label="Choose trading day"
+              >
+                <span id="date-label"></span
+                ><span aria-hidden="true">▣</span></button
+              ><input
+                id="date"
+                type="date"
+                aria-label="Trading day"
+                tabindex="-1"
+              />
+              <div id="date-picker" class="date-picker" hidden>
+                <div class="calendar-head">
+                  <button
+                    id="month-prev"
+                    type="button"
+                    aria-label="Previous month"
+                  >
+                    ‹</button
+                  ><strong id="month-label"></strong
+                  ><button id="month-next" type="button" aria-label="Next month">
+                    ›
+                  </button>
+                </div>
+                <div class="calendar-weekdays">
+                  <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span
+                  ><span>Fri</span><span>Sat</span><span>Sun</span>
+                </div>
+                <div id="calendar-days" class="calendar-days"></div>
+                <div class="calendar-note"><span></span>Closed or future</div>
               </div>
-              <div class="calendar-weekdays">
-                <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span
-                ><span>Fri</span><span>Sat</span><span>Sun</span>
-              </div>
-              <div id="calendar-days" class="calendar-days"></div>
-              <div class="calendar-note"><span></span>Closed or future</div>
             </div>
-          </div>
         </div>
-        <div class="field">
+        <div class="field interval-field">
+          <label for="interval">Price interval</label>
+          <select id="interval" aria-label="Price interval">
+            <option value="1minute">1 minute</option>
+            <option value="5minute" selected>5 minutes</option>
+            <option value="15minute">15 minutes</option>
+            <option value="30minute">30 minutes</option>
+          </select>
+        </div>
+        <div class="field expiry-field">
           <label for="expiry">NIFTY 50 option expiry</label
           ><select id="expiry" disabled>
             <option value="">Option expiry unavailable</option>

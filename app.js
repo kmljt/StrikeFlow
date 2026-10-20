@@ -874,15 +874,42 @@ function renderBaskets() {
           result.scenario?.error || "Scenario prices are unavailable.";
         scenarioPanel.append(message);
       } else {
-        const assumptions = document.createElement("p");
-        assumptions.className = "scenario-note";
+        const assumptions = document.createElement("div");
+        assumptions.className = "scenario-assumptions";
         const expiryModel = result.scenario.legs.every((leg) => leg.T === 0),
           ivNote = expiryModel
-            ? "expiry legs use intrinsic value"
+            ? "Intrinsic value at expiry"
             : result.scenario.fallbackCount
               ? `${result.scenario.fallbackCount} leg${result.scenario.fallbackCount === 1 ? "" : "s"} use ${Math.round(result.scenario.fallbackVol * 100)}% proxy IV`
-              : "market implied volatility held constant";
-        assumptions.textContent = `Black–Scholes anchored to today’s close · ${ivNote} · Risk-free proxy 5.73% · Dividend yield 0% · NIFTY close ${Math.round(result.scenario.actualSpot).toLocaleString("en-IN")}`;
+              : "Market implied volatility held constant";
+        const assumptionHeading = document.createElement("div");
+        assumptionHeading.className = "scenario-assumption-heading";
+        const modelTag = document.createElement("span");
+        modelTag.className = "scenario-assumption-tag";
+        modelTag.textContent = "MODEL ASSUMPTIONS";
+        const modelName = document.createElement("strong");
+        modelName.textContent = expiryModel ? "Intrinsic value" : "Black–Scholes";
+        assumptionHeading.append(modelTag, modelName);
+        const assumptionGrid = document.createElement("div");
+        assumptionGrid.className = "scenario-assumption-grid";
+        const assumptionRows = [
+          ["Volatility", ivNote, ""],
+          ["P&L anchor", `NIFTY close ₹${Math.round(result.scenario.actualSpot).toLocaleString("en-IN")}`, "is-profit"],
+          ["Risk-free rate", "5.73% proxy", "is-loss"],
+          ["Dividend yield", "0%", ""],
+        ];
+        assumptionRows.forEach(([nameText, valueText, tone]) => {
+          const item = document.createElement("div");
+          item.className = "scenario-assumption-item";
+          const name = document.createElement("span");
+          name.textContent = nameText;
+          const value = document.createElement("strong");
+          value.textContent = valueText;
+          if (tone) value.classList.add(tone);
+          item.append(name, value);
+          assumptionGrid.append(item);
+        });
+        assumptions.append(assumptionHeading, assumptionGrid);
         const wrap = document.createElement("div");
         wrap.className = "scenario-chart-wrap";
         const canvas = document.createElement("canvas");
