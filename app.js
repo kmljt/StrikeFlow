@@ -938,15 +938,27 @@ function renderBaskets() {
         canvas.addEventListener("pointerdown", (e) => {
           if (e.button !== 0) return;
           if (e.pointerType === "touch") {
-            try {
-              navigator.vibrate?.(8);
-            } catch {}
+            canvas.setPointerCapture(e.pointerId);
+            showScenarioHover(e, ref);
+            canvas.dataset.hoverSpot = String(ref.hoverPoint?.spot ?? "");
+            return;
           }
           ref.drag = { x: e.clientX, view: ref.view.slice() };
           canvas.setPointerCapture(e.pointerId);
           canvas.classList.add("is-panning");
         });
         canvas.addEventListener("pointermove", (e) => {
+          if (e.pointerType === "touch" && canvas.hasPointerCapture(e.pointerId)) {
+            showScenarioHover(e, ref);
+            const spot = ref.hoverPoint?.spot;
+            if (spot !== undefined && String(spot) !== canvas.dataset.hoverSpot) {
+              canvas.dataset.hoverSpot = String(spot);
+              try {
+                navigator.vibrate?.(8);
+              } catch {}
+            }
+            return;
+          }
           if (ref.drag) {
             const width = canvas.getBoundingClientRect().width - 94,
               span = ref.drag.view[1] - ref.drag.view[0],
@@ -960,13 +972,17 @@ function renderBaskets() {
           }
           showScenarioHover(e, ref);
         });
-        canvas.addEventListener("pointerup", () => {
+        canvas.addEventListener("pointerup", (e) => {
           ref.drag = null;
           canvas.classList.remove("is-panning");
+          delete canvas.dataset.hoverSpot;
+          if (canvas.hasPointerCapture(e.pointerId))
+            canvas.releasePointerCapture(e.pointerId);
         });
         canvas.addEventListener("pointercancel", () => {
           ref.drag = null;
           canvas.classList.remove("is-panning");
+          delete canvas.dataset.hoverSpot;
         });
         canvas.addEventListener(
           "wheel",
@@ -983,7 +999,7 @@ function renderBaskets() {
           { passive: false },
         );
         canvas.addEventListener("pointerleave", () => {
-          if (ref.drag) return;
+          if (ref.drag || canvas.dataset.hoverSpot !== undefined) return;
           ref.hoverPoint = null;
           tooltip.hidden = true;
           drawScenarioChart(
