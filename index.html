@@ -3235,9 +3235,9 @@
         .basket-item{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:8px}
         .instrument-info{grid-column:2;grid-row:1}
         .position-totals{grid-column:2/-1;grid-row:2;justify-content:space-between;margin:3px 0 0}
-        .basket-item>.edit-item,.basket-item>.remove-item{grid-row:1}
+        .basket-item>.edit-item,.basket-item>.remove-item:not(.edit-item){grid-row:1}
         .basket-item>.edit-item{grid-column:3}
-        .basket-item>.remove-item{grid-column:4}
+        .basket-item>.remove-item:not(.edit-item){grid-column:4}
         .position-total{text-align:left}
         .position-total>span{font-size:8px}
         .position-total>strong{font-size:11px}
@@ -3270,6 +3270,176 @@
         .position-totals{gap:8px}
         .position-total{min-width:0}
         .position-total>strong{font-size:10px}
+      }
+      .selection-check{
+        appearance:none;
+        -webkit-appearance:none;
+        display:grid;
+        place-content:center;
+        width:18px;
+        height:18px;
+        flex:0 0 18px;
+        margin:0 2px 0 0;
+        border:1.5px solid color-mix(in srgb,var(--basket-color,var(--site-accent,#a100ff)) 55%,#30343a);
+        border-radius:5px;
+        background:#111317;
+        cursor:pointer;
+        transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,transform .15s ease;
+      }
+      .selection-check::after{
+        content:"";
+        width:8px;
+        height:4px;
+        border:solid #fff;
+        border-width:0 0 2px 2px;
+        transform:rotate(-45deg) scale(0);
+        transition:transform .12s ease;
+      }
+      .selection-check:checked{
+        border-color:var(--basket-color,var(--site-accent,#a100ff));
+        background:var(--basket-color,var(--site-accent,#a100ff));
+        box-shadow:0 0 0 3px color-mix(in srgb,var(--basket-color,var(--site-accent,#a100ff)) 18%,transparent);
+      }
+      .selection-check:checked::after{transform:rotate(-45deg) scale(1)}
+      .selection-check:hover:not(:disabled){border-color:var(--basket-color,var(--site-accent,#a100ff))}
+      .selection-check:active:not(:disabled){transform:scale(.92)}
+      .selection-check:focus-visible{
+        outline:2px solid var(--basket-color,var(--site-accent,#a100ff));
+        outline-offset:3px;
+      }
+      .selection-check:disabled{cursor:not-allowed;opacity:.48}
+      .icon-action{display:inline-grid;place-items:center;width:30px;height:30px;flex:0 0 30px;padding:0;border:1px solid transparent;border-radius:8px;background:transparent;color:#9299a1;cursor:pointer;transition:color .14s ease,background .14s ease,border-color .14s ease,transform .14s ease}
+      .icon-action svg{display:block;width:15px;height:15px}
+      .icon-action:hover{border-color:#343941;background:#15171a;color:#f0f2f4}
+      .icon-action:active{transform:scale(.94)}
+      .icon-action:focus-visible{outline:2px solid var(--site-accent);outline-offset:2px}
+      .icon-action.remove-basket-button,.icon-action.remove-item:not(.edit-item){color:color-mix(in srgb,var(--red) 78%,#a1a7ad)}
+      .icon-action.remove-basket-button:hover,.icon-action.remove-item:not(.edit-item):hover{border-color:color-mix(in srgb,var(--red) 32%,transparent);background:color-mix(in srgb,var(--red) 10%,transparent);color:var(--red)}
+      .icon-action.edit-item:hover{border-color:color-mix(in srgb,var(--site-accent) 35%,transparent);background:color-mix(in srgb,var(--site-accent) 9%,transparent);color:var(--site-accent)}
+      @media(max-width:620px){
+        html,body{max-width:100%;overflow-x:clip}
+        #chart,#nifty-chart,#percent-chart{touch-action:none;user-select:none;-webkit-user-select:none}
+        .wrap{width:calc(100% - 24px);padding:14px 0 calc(28px + env(safe-area-inset-bottom))}
+        .hero{gap:13px;margin-bottom:16px;padding:15px;border-radius:13px}
+        .hero h1{font-size:clamp(29px,9vw,36px);line-height:1.04}
+        .hero p{max-width:32ch;font-size:12px;line-height:1.5}
+        .session{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;justify-content:stretch;gap:8px;width:100%;padding:9px}
+        .session-dot{grid-column:1;grid-row:1}
+        .session>label:not(.theme-picker){grid-column:2;grid-row:1;min-width:0;font-size:11px}
+        .session select{grid-column:3;grid-row:1;max-width:118px;min-width:0;font-size:12px}
+        .session .provider-status{grid-column:1/3;grid-row:2;justify-self:stretch;min-width:0;min-height:36px;padding-inline:10px;font-size:11px}
+        .session-divider{display:none}
+        .session .theme-picker{grid-column:3;grid-row:2;justify-self:end;min-height:34px;margin:0;padding:5px 8px;font-size:11px}
+        .content{margin-top:12px;padding:12px;border-radius:13px}
+        .result-head{gap:8px;padding:0 1px 10px}
+        .ticker h2{font-size:13px}
+        .subline{font-size:11px}
+        .mini-plot,.main-plot{margin:4px 0 11px;padding:0}
+        .mini-plot h3,.main-plot h3{font-size:10px;letter-spacing:.08em}
+        .chart-wrap,.mini-chart-wrap,.percent-plot .mini-chart-wrap{height:clamp(210px,64vw,260px);border-radius:10px}
+        .percent-plot{margin-top:14px;padding-top:11px}
+        .basket-legend{gap:6px;margin:9px 0}
+        .basket-legend span{min-width:0;max-width:100%;gap:6px;padding:5px 7px;font-size:10px;overflow-wrap:anywhere}
+        .basket-legend .legend-change{font-size:9px}
+        .legend{gap:6px;padding:8px 1px 0;font-size:9px;overflow-wrap:anywhere}
+        .basket-section-head{margin:19px 2px 9px}
+        .basket-section-head h2{font-size:22px}
+        .controls{grid-template-columns:minmax(0,1fr);gap:11px;padding:12px}
+        .field{min-width:0}
+        .field label{font-size:9px;letter-spacing:.09em;line-height:1.4;white-space:normal}
+        .field input,.field select,.date-display{width:100%;min-width:0;height:44px;font-size:16px}
+        .date-display>button{width:100%;min-width:0;font-size:15px}
+        .basket-control-actions{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+        .basket-control-actions .button{min-width:0;min-height:42px;padding:0 7px;font-size:11px;white-space:normal;line-height:1.2}
+        .basket{min-width:0;padding:11px;border-radius:12px}
+        .basket-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;align-items:center;gap:6px;padding:0;min-width:0}
+        .basket-head .selection-check{grid-column:1;grid-row:1}
+        .basket-head h2{grid-column:2;grid-row:1;max-width:none;min-width:0;font-size:13px;white-space:normal;overflow-wrap:anywhere;line-height:1.25}
+        .basket-head .tag{grid-column:3;grid-row:1;white-space:nowrap;font-size:9px}
+        .basket-head>span:not(.tag):not(.spacer){font-size:9px!important;margin-left:0!important}
+        .basket-head>strong{font-size:11px!important}
+        .basket-head .spacer{display:none}
+        .basket-head-actions{grid-column:1/-1;display:flex;flex-wrap:nowrap;align-items:center;justify-content:flex-start;gap:5px;width:100%;min-width:0;padding-top:3px}
+        .basket-head-actions .basket-color-picker{width:24px;height:24px;flex-basis:24px}
+        .basket-head-actions .basket-random-color{width:24px;height:24px}
+        .basket-head .basket-head-actions>.icon-action{position:static;inset:auto;display:inline-grid;width:28px;height:28px;min-width:28px;min-height:28px;flex:0 0 28px;box-sizing:border-box;margin:0;padding:0;transform:none;white-space:normal}
+        .basket-head .basket-head-actions>.button.add-option-button{position:static;inset:auto;display:inline-flex;align-items:center;justify-content:center;flex:1 1 auto;grid-column:auto;grid-row:auto;width:auto;min-width:0;height:36px;min-height:36px;margin:0;padding:0 6px;font-size:10px;white-space:nowrap}
+        .basket-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:9px;padding:10px 0 3px}
+        .basket-metrics>div{min-width:0}
+        .basket-metrics>div:nth-child(3){grid-column:1/-1}
+        .basket-metrics span{font-size:8px;letter-spacing:.11em}
+        .basket-metrics strong{font-size:12px;overflow-wrap:anywhere}
+        .basket-performance{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:10px;margin-top:8px;padding:9px 0}
+        .performance-stat{min-width:0;padding:0 7px}
+        .performance-stat>span{font-size:8px}
+        .performance-stat>strong{font-size:12px;overflow-wrap:anywhere}
+        .performance-stat>small{font-size:9px;overflow-wrap:anywhere}
+        .basket-item{grid-template-columns:18px minmax(0,1fr) auto auto;gap:6px;padding:9px}
+        .instrument-info>span{font-size:11px;overflow-wrap:anywhere}
+        .instrument-info small{font-size:9px;overflow-wrap:anywhere}
+        .basket-item>.edit-item,.basket-item>.remove-item{min-height:30px;padding:4px 6px;font-size:9px}
+        .basket-item>.icon-action{width:30px;height:30px;min-height:30px;padding:0}
+        .position-totals{flex-wrap:wrap;gap:8px 12px}
+        .position-total{min-width:0}
+        .position-total>strong{font-size:10px}
+        .scenario-panel{min-width:0;overflow:hidden}
+        .scenario-title{align-items:flex-start;flex-direction:column}
+        .scenario-controls{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));align-self:stretch;width:100%;margin:2px 0 0;gap:6px}
+        .scenario-control{width:100%;min-width:0;min-height:44px;height:44px;padding:0 2px;border-radius:9px;font-size:13px;touch-action:manipulation}
+        .scenario-control:last-child{font-size:10px}
+        .scenario-chart-wrap{height:200px;max-width:100%}
+        .scenario-chart{touch-action:none;user-select:none;-webkit-user-select:none}
+        .chart-tooltip{max-width:calc(100vw - 48px);font-size:11px}
+        .chart-tooltip .tooltip-row{gap:10px}
+        .foot{margin-top:22px;padding-top:13px;font-size:8px;line-height:1.6;text-align:center;overflow-wrap:anywhere}
+        dialog{max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);border-radius:14px}
+        #token-dialog form,#basket-dialog form,#option-dialog form,#strangle-form{gap:12px;padding:15px}
+        #token-dialog h2,#basket-dialog h2,#option-dialog h2,#strangle-form h2{font-size:20px;overflow-wrap:anywhere}
+        #token-dialog p,#strangle-form>p{font-size:12px;line-height:1.5}
+        #basket-dialog input,#option-dialog input,#option-dialog select,#token-dialog input,.strangle-inputs input{min-height:44px;font-size:16px}
+        #option-dialog form>div:last-child,#basket-dialog form>div:last-child,#token-dialog form>.token-actions,#strangle-form .strangle-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+        #option-dialog form>div:last-child .button,#basket-dialog form>div:last-child .button,#token-dialog form>.token-actions .button,#strangle-form .strangle-actions .button{width:100%;min-width:0;min-height:42px;padding:0 8px;font-size:12px}
+        #token-dialog form>.token-actions .spacer{display:none}
+        #option-mode-tabs button,#strangle-mode-tabs button{min-height:42px;padding-inline:5px;font-size:11px}
+        .option-entry-fields,.smart-input-grid,.strangle-inputs{grid-template-columns:minmax(0,1fr);gap:10px}
+        .option-entry-fields .field label,.smart-input-grid .field label{white-space:normal}
+        #option-dialog form .manual-option-preview{padding:12px}
+        #option-dialog form .manual-option-preview-row{grid-template-columns:68px minmax(0,1fr)!important;gap:8px}
+        #option-dialog form .manual-option-preview-row span:last-child{font-size:11px}
+        #option-dialog form .manual-option-total strong{font-size:14px}
+        #option-dialog form .smart-result{grid-template-columns:minmax(0,1fr)!important;gap:12px;padding:12px}
+        #option-dialog form .smart-result-row{grid-template-columns:70px minmax(0,1fr)!important;gap:8px}
+        #option-dialog form .smart-result .button{width:100%!important;min-width:0;min-height:42px}
+        #option-dialog form .smart-alternative-row{grid-template-columns:minmax(0,1fr) auto;gap:8px}
+        .smart-alternative-copy span{overflow-wrap:anywhere}
+        .strangle-legs,#simple-strangle-summary{grid-template-columns:minmax(0,1fr);gap:8px}
+        .strangle-total,#simple-strangle-total{align-items:flex-start;flex-direction:column;gap:5px;font-size:11px;overflow-wrap:anywhere}
+        .error{font-size:12px;overflow-wrap:anywhere}
+        .date-picker{left:0;right:auto;width:min(300px,calc(100vw - 48px));max-width:calc(100vw - 48px)}
+        .calendar-weekdays,.calendar-days{gap:2px}
+        .calendar-days button{min-width:0;min-height:34px}
+      }
+      @media(max-width:390px){
+        .wrap{width:calc(100% - 18px)}
+        .hero{padding:12px}
+        .session{grid-template-columns:auto minmax(0,1fr) auto;gap:6px;padding:8px}
+        .session select{max-width:104px}
+        .session .provider-status{font-size:10px}
+        .basket-control-actions{grid-template-columns:minmax(0,1fr)}
+        .basket-control-actions .button{min-height:40px;font-size:12px}
+        .basket-head{grid-template-columns:auto minmax(0,1fr) auto}
+        .basket-head h2{grid-column:2;grid-row:1}
+        .basket-head .tag{grid-column:3;grid-row:1}
+        .basket-head>span:not(.tag):not(.spacer){grid-column:2;grid-row:2}
+        .basket-head>strong{grid-column:3;grid-row:2;justify-self:end}
+        .basket-item{grid-template-columns:18px minmax(0,1fr) auto}
+        .basket-item>.edit-item{grid-column:2;grid-row:3;justify-self:start}
+        .basket-item>.remove-item:not(.edit-item){grid-column:3;grid-row:3}
+        .position-totals{grid-column:2/-1;grid-row:2}
+        .content{padding:9px}
+        .chart-wrap,.mini-chart-wrap,.percent-plot .mini-chart-wrap{height:220px}
+        #option-dialog form .smart-result-row{grid-template-columns:62px minmax(0,1fr)!important}
+        #option-dialog form .manual-option-preview-row{grid-template-columns:58px minmax(0,1fr)!important}
       }
       @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
     </style>
@@ -3616,6 +3786,6 @@
         >
       </div>
     </main>
-    <script src="app.js?v=simple-strangle-default"></script>
+    <script src="app.js?v=touch-graph-scrub"></script>
   </body>
 </html>

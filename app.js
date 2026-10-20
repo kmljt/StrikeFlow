@@ -287,11 +287,36 @@ $("interval").addEventListener("change", () => {
   invalidateResults();
 });
 const chartCanvas = $("chart");
+function chartTouchStart(canvas, showHover) {
+  canvas.addEventListener("pointerdown", (event) => {
+    if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+    if (event.button !== 0) return;
+    canvas.setPointerCapture(event.pointerId);
+    showHover(event);
+    try {
+      navigator.vibrate?.(8);
+    } catch {}
+  });
+  canvas.addEventListener("pointerup", (event) => {
+    if (canvas.hasPointerCapture(event.pointerId))
+      canvas.releasePointerCapture(event.pointerId);
+  });
+}
 chartCanvas.addEventListener("pointermove", showChartHover);
-chartCanvas.addEventListener("pointerleave", clearChartHover);
+chartTouchStart(chartCanvas, showChartHover);
+chartCanvas.addEventListener("pointerleave", (event) => {
+  if (event.pointerType !== "touch" && event.pointerType !== "pen")
+    clearChartHover();
+});
+chartCanvas.addEventListener("pointercancel", clearChartHover);
 for (const id of ["nifty-chart", "percent-chart"]) {
   $(id).addEventListener("pointermove", showMiniHover);
-  $(id).addEventListener("pointerleave", clearMiniHover);
+  chartTouchStart($(id), showMiniHover);
+  $(id).addEventListener("pointerleave", (event) => {
+    if (event.pointerType !== "touch" && event.pointerType !== "pen")
+      clearMiniHover();
+  });
+  $(id).addEventListener("pointercancel", clearMiniHover);
 }
 window.addEventListener("resize", () => {
   if (window.chartData) draw(window.chartData);
@@ -400,6 +425,16 @@ function percentChange(from, to) {
   return from
     ? `${to >= from ? "+" : ""}${(((to - from) / from) * 100).toFixed(2)}%`
     : "—";
+}
+function setActionIcon(button, type, label) {
+  const paths = {
+    edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L9 17l-4 1 1-4Z"/>',
+    remove: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/>',
+  };
+  button.classList.add("icon-action");
+  button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${paths[type]}</svg>`;
+  button.setAttribute("aria-label", label);
+  button.title = label;
 }
 function intradayStats(points) {
   let maxProfit = { value: 0, t: null },
@@ -543,13 +578,13 @@ function renderBaskets() {
     const rename = document.createElement("button");
     rename.className = "tiny-button";
     rename.type = "button";
-    rename.textContent = "Rename";
+    setActionIcon(rename, "edit", `Rename ${displayName}`);
     rename.addEventListener("click", () => openBasketDialog(b.id));
     const del = document.createElement("button");
     del.className = "tiny-button remove-basket-button";
     del.style.color = "var(--red)";
     del.type = "button";
-    del.textContent = "Remove basket";
+    setActionIcon(del, "remove", `Remove ${displayName}`);
     del.addEventListener("click", () => {
       state.baskets = state.baskets.filter((x) => x.id !== b.id);
       invalidateResults();
@@ -558,7 +593,7 @@ function renderBaskets() {
     });
     const actions = document.createElement("div");
     actions.className = "basket-head-actions";
-    actions.append(colorPicker, randomColor, rename, del, plus);
+    actions.append(colorPicker, randomColor, plus, rename, del);
     const spacer = document.createElement("span");
     spacer.className = "spacer";
     head.append(basketToggle, title, count, pnlLabel, pnl, spacer, actions);
@@ -721,13 +756,12 @@ function renderBaskets() {
       const edit = document.createElement("button");
       edit.className = "remove-item edit-item";
       edit.type = "button";
-      edit.textContent = "Edit";
-      edit.setAttribute("aria-label", `Edit ${positionName(position)}`);
+      setActionIcon(edit, "edit", `Edit ${positionName(position)}`);
       edit.addEventListener("click", () => openOptionDialog(b.id, i));
       const remove = document.createElement("button");
       remove.className = "remove-item";
       remove.type = "button";
-      remove.textContent = "Remove";
+      setActionIcon(remove, "remove", `Remove ${positionName(position)}`);
       remove.addEventListener("click", () => {
         invalidateResults();
         b.items.splice(i, 1);
@@ -803,6 +837,11 @@ function renderBaskets() {
         addScenarioControls(controls, ref);
         canvas.addEventListener("pointerdown", (e) => {
           if (e.button !== 0) return;
+          if (e.pointerType === "touch") {
+            try {
+              navigator.vibrate?.(8);
+            } catch {}
+          }
           ref.drag = { x: e.clientX, view: ref.view.slice() };
           canvas.setPointerCapture(e.pointerId);
           canvas.classList.add("is-panning");
