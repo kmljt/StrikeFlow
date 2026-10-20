@@ -2731,6 +2731,9 @@
       .scenario-chart-tooltip {
         position: absolute;
         z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 5px;
         max-width: calc(100% - 16px);
         padding: 7px 9px;
         border: 1px solid #353b41;
@@ -2744,6 +2747,10 @@
       }
       .scenario-chart-tooltip[hidden] {
         display: none !important;
+      }
+      .scenario-tooltip-separator {
+        color: #7f8992;
+        font-weight: 500;
       }
       @media (max-width: 640px) {
         .scenario-chart-wrap {

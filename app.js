@@ -927,6 +927,7 @@ function renderBaskets() {
           canvas,
           tooltip,
           scenario: result.scenario,
+          buyValue: result.buyValue,
           color: basketLineColor(index, b.accentColor),
           actualSpot: result.scenario.actualSpot,
           hoverPoint: null,
@@ -2933,6 +2934,10 @@ function drawScenarioChart(
     ctx.stroke();
   }
 }
+function positionTopTooltip(tooltip, x, width, gap = 12) {
+  tooltip.style.left = `${x > width * 0.65 ? Math.max(8, x - tooltip.offsetWidth - gap) : Math.min(width - tooltip.offsetWidth - 8, x + gap)}px`;
+  tooltip.style.top = "10px";
+}
 function showScenarioHover(e, ref) {
   const rect = ref.canvas.getBoundingClientRect(),
     x = e.clientX - rect.left,
@@ -2951,10 +2956,27 @@ function showScenarioHover(e, ref) {
     point = { spot, pnl },
     tooltip = ref.tooltip;
   ref.hoverPoint = point;
-  tooltip.textContent = `NIFTY ${Math.round(spot).toLocaleString("en-IN")}  ·  ${signed(pnl)}`;
+  const spotLabel = document.createElement("span"),
+    pnlValue = document.createElement("strong"),
+    separator = document.createElement("span"),
+    pnlPercent = document.createElement("strong"),
+    changePercent = ref.buyValue > 0 ? (pnl / ref.buyValue) * 100 : null,
+    tone = pnl > 0 ? "green" : pnl < 0 ? "red" : "";
+  spotLabel.textContent = `NIFTY ${Math.round(spot).toLocaleString("en-IN")} ·`;
+  pnlValue.textContent = signed(pnl);
+  separator.textContent = "·";
+  pnlPercent.textContent =
+    changePercent === null
+      ? "—"
+      : `${changePercent > 0 ? "+" : ""}${changePercent.toFixed(2)}%`;
+  separator.className = "scenario-tooltip-separator";
+  if (tone) {
+    pnlValue.className = tone;
+    pnlPercent.className = tone;
+  }
+  tooltip.replaceChildren(spotLabel, pnlValue, separator, pnlPercent);
   tooltip.hidden = false;
-  tooltip.style.left = "8px";
-  tooltip.style.top = "8px";
+  positionTopTooltip(tooltip, x, rect.width);
   drawScenarioChart(
     ref.canvas,
     ref.scenario,
@@ -3389,8 +3411,7 @@ function showMiniHover(e) {
     }),
   );
   tip.hidden = false;
-  tip.style.left = `${x > rect.width * 0.65 ? Math.max(8, x - tip.offsetWidth - 12) : Math.min(rect.width - tip.offsetWidth - 8, x + 12)}px`;
-  tip.style.top = "10px";
+  positionTopTooltip(tip, x, rect.width);
   $("chart-tooltip").hidden = true;
   $("nifty-tooltip").hidden = mode !== "price";
   $("percent-tooltip").hidden = mode !== "percent";
@@ -3464,8 +3485,7 @@ function showChartHover(e) {
   );
   const tip = $("chart-tooltip");
   tip.hidden = false;
-  tip.style.left = `${x > rect.width * 0.65 ? Math.max(8, x - tip.offsetWidth - 14) : Math.min(rect.width - tip.offsetWidth - 8, x + 14)}px`;
-  tip.style.top = `${Math.max(8, Math.min(rect.height - tip.offsetHeight - 8, y + 12))}px`;
+  positionTopTooltip(tip, x, rect.width);
   $("nifty-tooltip").hidden = true;
   $("percent-tooltip").hidden = true;
   draw(d);
