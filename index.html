@@ -3286,21 +3286,11 @@
         cursor:pointer;
         transition:background .15s ease,border-color .15s ease,box-shadow .15s ease,transform .15s ease;
       }
-      .selection-check::after{
-        content:"";
-        width:8px;
-        height:4px;
-        border:solid #fff;
-        border-width:0 0 2px 2px;
-        transform:rotate(-45deg) scale(0);
-        transition:transform .12s ease;
-      }
       .selection-check:checked{
         border-color:var(--basket-color,var(--site-accent,#a100ff));
         background:var(--basket-color,var(--site-accent,#a100ff));
         box-shadow:0 0 0 3px color-mix(in srgb,var(--basket-color,var(--site-accent,#a100ff)) 18%,transparent);
       }
-      .selection-check:checked::after{transform:rotate(-45deg) scale(1)}
       .selection-check:hover:not(:disabled){border-color:var(--basket-color,var(--site-accent,#a100ff))}
       .selection-check:active:not(:disabled){transform:scale(.92)}
       .selection-check:focus-visible{
@@ -3446,6 +3436,14 @@
       .picker-step-button:hover:not(:disabled),.picker-step-button:active:not(:disabled){background:color-mix(in srgb,var(--site-accent) 10%,transparent);color:var(--site-accent)}
       .picker-step-button:disabled{opacity:.38;cursor:not-allowed}
       @media(max-width:760px){.picker-stepper{display:grid;grid-template-columns:34px minmax(0,1fr) 34px;align-items:center;gap:6px}.picker-step-button{display:grid;place-items:center;width:34px;height:42px;min-height:42px;padding:0;border:0;border-radius:7px;background:transparent;color:#9da5ac;font:500 17px/1 system-ui;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}.picker-stepper input[type=number]{min-width:0;text-align:center}}
+      #option-dialog[open],#strangle-dialog[open]{position:fixed;inset:clamp(12px,4vh,32px) 0 auto;margin:0 auto}
+      #option-dialog form .manual-option-preview{min-height:150px}
+      #option-dialog form .smart-result{min-height:175px}
+      #strangle-dialog .strangle-result{min-height:135px}
+      #strangle-dialog #simple-strangle-result{min-height:140px}
+      #option-dialog form .manual-option-preview,#option-dialog form .smart-result{transition:opacity .14s ease}
+      #option-dialog form .manual-option-preview.is-updating,#option-dialog form .smart-result.is-updating,#strangle-dialog .strangle-result.is-updating,#strangle-dialog #simple-strangle-result.is-updating{opacity:.6;pointer-events:none}
+      @media(max-width:760px){#option-dialog form .smart-result{min-height:245px}#strangle-dialog .strangle-result{min-height:205px}#strangle-dialog #simple-strangle-result{min-height:175px}}
       @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
     </style>
   </head>

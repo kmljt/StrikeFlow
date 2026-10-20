@@ -222,9 +222,13 @@ $("smart-add").addEventListener("click", () => addSmartPosition());
 $("option-type-select").addEventListener("change", () => {
   const current = Number($("strike-input").value);
   setManualStrike(Number.isFinite(current) ? current : null);
+  updateOptionDialogHeading();
   scheduleManualOptionPreview();
 });
-$("strike-input").addEventListener("input", scheduleManualOptionPreview);
+$("strike-input").addEventListener("input", () => {
+  updateOptionDialogHeading();
+  scheduleManualOptionPreview();
+});
 $("lots").addEventListener("input", scheduleManualOptionPreview);
 function syncStepButtons(targetId) {
   const input = $(targetId);
@@ -266,7 +270,6 @@ document.querySelectorAll(".picker-step-button").forEach((button) => {
     if (next === current) return;
     input.value = String(next);
     input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
   });
   syncStepButtons(input.id);
 });
@@ -341,9 +344,9 @@ function chartTouchStart(canvas, showHover) {
     if (event.button !== 0) return;
     canvas.setPointerCapture(event.pointerId);
     showHover(event);
-    // Treat the starting candle as the current selection. Haptics fire only
-    // when a drag crosses into a different candle, not just on touch start.
-    canvas.dataset.hoverCandle = String(window.hoverIndex ?? "");
+    // Use the hovered timestamp because the NIFTY chart remains interactive
+    // when no basket series exists to provide a basket-chart index.
+    canvas.dataset.hoverCandle = String(window.linkedHoverTime ?? "");
   });
   canvas.addEventListener("pointermove", (event) => {
     if (
@@ -351,9 +354,9 @@ function chartTouchStart(canvas, showHover) {
       !canvas.hasPointerCapture(event.pointerId)
     )
       return;
-    const index = window.hoverIndex;
-    if (index === null || index === undefined) return;
-    const next = String(index);
+    const time = window.linkedHoverTime;
+    if (time === null || time === undefined) return;
+    const next = String(time);
     if (next === canvas.dataset.hoverCandle) return;
     canvas.dataset.hoverCandle = next;
     if (event.pointerType === "touch") {
@@ -1059,7 +1062,7 @@ function scheduleSmartStrangle() {
   window.smartStrangleResult = null;
   $("strangle-add").disabled = true;
   $("strangle-add").textContent = "Finding picks…";
-  $("strangle-result").hidden = true;
+  $("strangle-result").classList.add("is-updating");
   $("strangle-error").hidden = true;
   if (!$("strangle-dialog").open) return;
   const expiry = $("expiry").value,
@@ -1140,6 +1143,7 @@ async function findSmartStrangle(requestId = ++smartStrangleRequest) {
     total.textContent = `${formatSmartMoney(spent)} · ${formatSmartMoney(Math.abs(remainder))} ${remainder >= 0 ? "under" : "over"}`;
     total.classList.toggle("over", remainder < 0);
     $("strangle-result").hidden = false;
+    $("strangle-result").classList.remove("is-updating");
     error.hidden = true;
     $("strangle-add").disabled = false;
     $("strangle-add").textContent = `Add strangle · ${formatSmartMoney(spent)}`;
@@ -1189,7 +1193,7 @@ function scheduleSimpleStrangle() {
   window.simpleStrangleResult = null;
   $("strangle-add").disabled = true;
   $("strangle-add").textContent = "Finding strikes…";
-  $("simple-strangle-result").hidden = true;
+  $("simple-strangle-result").classList.add("is-updating");
   $("strangle-error").hidden = true;
   if (!$("strangle-dialog").open || window.strangleMode !== "simple") return;
   const expiry = $("expiry").value,
@@ -1246,6 +1250,7 @@ async function findSimpleStrangle(requestId = ++simpleStrangleRequest) {
       ? "Unavailable"
       : formatSmartMoney(result.estimatedCost);
     $("simple-strangle-result").hidden = false;
+    $("simple-strangle-result").classList.remove("is-updating");
     $("strangle-error").hidden = true;
     $("strangle-add").disabled = false;
     $("strangle-add").textContent = result.estimatedCost === null
@@ -1295,6 +1300,13 @@ function openBasketDialog(id) {
   $("basket-dialog").showModal();
   $("basket-name").focus();
 }
+function updateOptionDialogHeading() {
+  if (window.editPositionIndex === null || window.editPositionIndex === undefined) return;
+  const strike = $("strike-input").value.trim(),
+    type = $("option-type-select").value,
+    expiry = $("expiry").value;
+  $("option-basket-name").textContent = `${strike ? `${strike} ` : ""}${type}${expiry ? ` · ${formatSmartDate(expiry)}` : ""}`;
+}
 function finishBasketDialog() {
   if ($("basket-dialog").returnValue !== "save") return;
   const name = $("basket-name").value.trim(),
@@ -1330,6 +1342,7 @@ function openOptionDialog(id, index = null) {
     $("expiry").value = position.expiry;
     loadOptionContracts();
   } else configureManualOptionFields(position);
+  updateOptionDialogHeading();
   if (!$("expiry").value) {
     $("option-error").textContent = "Choose an option expiry above first.";
     $("option-error").hidden = false;
@@ -1418,7 +1431,8 @@ async function findSmartOption() {
   }
   const requestId = ++smartPickRequest;
   window.smartPickResult = null;
-  $("smart-result").hidden = true;
+  $("smart-result").classList.add("is-updating");
+  $("smart-add").disabled = true;
   error.hidden = true;
   submit.disabled = true;
   submit.textContent = "Finding a fit…";
@@ -1486,6 +1500,8 @@ async function findSmartOption() {
     }));
     $("smart-alternatives").hidden = alternativeList.childElementCount === 0;
     $("smart-result").hidden = false;
+    $("smart-result").classList.remove("is-updating");
+    $("smart-add").disabled = false;
   } catch (e) {
     if (requestId !== smartPickRequest) return;
     error.textContent = e.message;
@@ -1507,7 +1523,8 @@ function scheduleSmartPick() {
   clearTimeout(smartPickDebounce);
   smartPickRequest++;
   window.smartPickResult = null;
-  $("smart-result").hidden = true;
+  $("smart-result").classList.add("is-updating");
+  $("smart-add").disabled = true;
   $("option-error").hidden = true;
   if (window.optionEntryMode === "smart") {
     $("option-submit").disabled = false;
@@ -1916,6 +1933,7 @@ function configureManualOptionFields(position = null) {
   $("lots").value = String(position?.lots || $("lots").value || 1);
   $("lots").dispatchEvent(new Event("input", { bubbles: true }));
   setManualStrike(target);
+  updateOptionDialogHeading();
   scheduleManualOptionPreview();
 }
 function setManualStrike(target = null) {
@@ -1939,7 +1957,8 @@ function setManualStrike(target = null) {
 function scheduleManualOptionPreview() {
   clearTimeout(manualOptionPreviewDebounce);
   const requestId = ++manualOptionPreviewRequest;
-  $("manual-option-preview").hidden = true;
+  if (!$("manual-option-preview").hidden)
+    $("manual-option-preview").classList.add("is-updating");
   if (
     window.optionEntryMode !== "manual" ||
     !$("option-dialog").open ||
@@ -1955,7 +1974,16 @@ function scheduleManualOptionPreview() {
     contract = window.expiryOptions.find((option) =>
       option.type === type && Number(option.strike) === strike,
     );
-  if (!contract || !Number.isInteger(lots) || lots < 1 || !reference) return;
+  if (window.editPositionIndex !== null && window.editPositionIndex !== undefined) {
+    updateOptionDialogHeading();
+  }
+  if (Number.isFinite(strike) && strike > 0) {
+    $("manual-option-preview-title").textContent = `${strike} ${type} · ${lots} lot${lots === 1 ? "" : "s"}`;
+  }
+  if (!contract || !Number.isInteger(lots) || lots < 1 || !reference) {
+    return;
+  }
+  $("manual-option-preview").classList.add("is-updating");
   manualOptionPreviewDebounce = setTimeout(
     () => loadManualOptionPreview({ requestId, type, strike, lots, reference }),
     250,
@@ -1963,17 +1991,21 @@ function scheduleManualOptionPreview() {
 }
 async function loadManualOptionPreview({ requestId, type, strike, lots, reference }) {
   const preview = $("manual-option-preview");
+  const firstLoad = preview.hidden;
   preview.hidden = false;
+  preview.classList.add("is-updating");
   $("manual-option-preview-title").textContent = `${strike} ${type} · ${lots} lot${lots === 1 ? "" : "s"}`;
-  $("manual-option-preview-total").textContent = "Loading…";
-  const loading = document.createElement("div");
-  loading.className = "manual-option-preview-row";
-  const loadingLabel = document.createElement("span");
-  loadingLabel.textContent = "PRICE";
-  const loadingText = document.createElement("span");
-  loadingText.textContent = "Loading option price…";
-  loading.append(loadingLabel, loadingText);
-  $("manual-option-preview-details").replaceChildren(loading);
+  if (firstLoad) {
+    $("manual-option-preview-total").textContent = "Loading…";
+    const loading = document.createElement("div");
+    loading.className = "manual-option-preview-row";
+    const loadingLabel = document.createElement("span");
+    loadingLabel.textContent = "PRICE";
+    const loadingText = document.createElement("span");
+    loadingText.textContent = "Loading option price…";
+    loading.append(loadingLabel, loadingText);
+    $("manual-option-preview-details").replaceChildren(loading);
+  }
   try {
     const query = new URLSearchParams({
         expiry: $("expiry").value,
@@ -2016,6 +2048,7 @@ async function loadManualOptionPreview({ requestId, type, strike, lots, referenc
       row.append(name, detail);
       return row;
     }));
+    preview.classList.remove("is-updating");
   } catch (error) {
     if (requestId !== manualOptionPreviewRequest) return;
     $("manual-option-preview-total").textContent = "Unavailable";
@@ -2027,6 +2060,7 @@ async function loadManualOptionPreview({ requestId, type, strike, lots, referenc
     detail.textContent = error.message || "Option price unavailable";
     row.append(name, detail);
     $("manual-option-preview-details").replaceChildren(row);
+    preview.classList.remove("is-updating");
   }
 }
 function formPosition() {
