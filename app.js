@@ -293,13 +293,35 @@ function chartTouchStart(canvas, showHover) {
     if (event.button !== 0) return;
     canvas.setPointerCapture(event.pointerId);
     showHover(event);
-    try {
-      navigator.vibrate?.(8);
-    } catch {}
+    // Treat the starting candle as the current selection. Haptics fire only
+    // when a drag crosses into a different candle, not just on touch start.
+    canvas.dataset.hoverCandle = String(window.hoverIndex ?? "");
+  });
+  canvas.addEventListener("pointermove", (event) => {
+    if (
+      (event.pointerType !== "touch" && event.pointerType !== "pen") ||
+      !canvas.hasPointerCapture(event.pointerId)
+    )
+      return;
+    const index = window.hoverIndex;
+    if (index === null || index === undefined) return;
+    const next = String(index);
+    if (next === canvas.dataset.hoverCandle) return;
+    canvas.dataset.hoverCandle = next;
+    if (event.pointerType === "touch") {
+      try {
+        navigator.vibrate?.(8);
+      } catch {}
+    }
   });
   canvas.addEventListener("pointerup", (event) => {
-    if (canvas.hasPointerCapture(event.pointerId))
+    if (canvas.hasPointerCapture(event.pointerId)) {
       canvas.releasePointerCapture(event.pointerId);
+      delete canvas.dataset.hoverCandle;
+    }
+  });
+  canvas.addEventListener("pointercancel", () => {
+    delete canvas.dataset.hoverCandle;
   });
 }
 chartCanvas.addEventListener("pointermove", showChartHover);
