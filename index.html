@@ -3150,6 +3150,18 @@
       .baskets{gap:13px}
       .basket{padding:16px 18px;border-radius:14px;transition:border-color .16s ease,box-shadow .16s ease,background .16s ease}
       .basket:hover{transform:none}
+      @media (hover: none) {
+        .basket:hover {
+          background: linear-gradient(
+            120deg,
+            color-mix(in srgb, var(--basket-color) 6%, #090a0c),
+            #060708 46%
+          );
+          box-shadow:
+            0 12px 34px #0008,
+            0 0 24px color-mix(in srgb, var(--basket-color) 8%, transparent);
+        }
+      }
       .basket-head{gap:9px}
       .basket-head h2{font-size:15px}
       .basket-head .button{min-height:35px;height:35px}
