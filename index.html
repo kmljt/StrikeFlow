@@ -3441,6 +3441,11 @@
         #option-dialog form .smart-result-row{grid-template-columns:62px minmax(0,1fr)!important}
         #option-dialog form .manual-option-preview-row{grid-template-columns:58px minmax(0,1fr)!important}
       }
+      .picker-stepper{display:contents}
+      .picker-step-button{display:none}
+      .picker-step-button:hover:not(:disabled),.picker-step-button:active:not(:disabled){background:color-mix(in srgb,var(--site-accent) 10%,transparent);color:var(--site-accent)}
+      .picker-step-button:disabled{opacity:.38;cursor:not-allowed}
+      @media(max-width:760px){.picker-stepper{display:grid;grid-template-columns:34px minmax(0,1fr) 34px;align-items:center;gap:6px}.picker-step-button{display:grid;place-items:center;width:34px;height:42px;min-height:42px;padding:0;border:0;border-radius:7px;background:transparent;color:#9da5ac;font:500 17px/1 system-ui;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}.picker-stepper input[type=number]{min-width:0;text-align:center}}
       @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
     </style>
   </head>
@@ -3663,12 +3668,12 @@
             </div>
             <div class="field">
               <label for="strike-input">Strike · ₹50 steps</label>
-              <input id="strike-input" type="number" min="0" step="50" placeholder="Nearest to prior close" disabled />
+              <div class="picker-stepper"><button class="picker-step-button" type="button" data-step-target="strike-input" data-step-direction="-1" aria-label="Lower strike">−</button><input id="strike-input" type="number" min="0" step="50" placeholder="Nearest to prior close" disabled /><button class="picker-step-button" type="button" data-step-target="strike-input" data-step-direction="1" aria-label="Raise strike">+</button></div>
               <small id="strike-reference" class="strike-reference"></small>
             </div>
             <div class="field">
               <label for="lots">Lots · 65 each</label>
-              <input id="lots" type="number" min="1" step="1" value="1" />
+              <div class="picker-stepper"><button class="picker-step-button" type="button" data-step-target="lots" data-step-direction="-1" aria-label="Decrease lot count">−</button><input id="lots" type="number" min="1" step="1" value="1" /><button class="picker-step-button" type="button" data-step-target="lots" data-step-direction="1" aria-label="Increase lot count">+</button></div>
             </div>
           </div>
           <section id="manual-option-preview" class="manual-option-preview" hidden aria-live="polite">
@@ -3689,11 +3694,11 @@
               </div>
               <div class="field">
                 <label for="smart-otm-points">Strike offset · points</label>
-                <input id="smart-otm-points" type="number" min="-10000" max="10000" step="50" value="250" />
+                <div class="picker-stepper"><button class="picker-step-button" type="button" data-step-target="smart-otm-points" data-step-direction="-1" aria-label="Decrease strike offset">−</button><input id="smart-otm-points" type="number" min="-10000" max="10000" step="50" value="250" /><button class="picker-step-button" type="button" data-step-target="smart-otm-points" data-step-direction="1" aria-label="Increase strike offset">+</button></div>
               </div>
               <div class="field">
                 <label for="smart-budget">Premium budget · ₹</label>
-                <input id="smart-budget" type="number" min="0" max="10000000" step="100" value="6000" />
+                <div class="picker-stepper"><button class="picker-step-button" type="button" data-step-target="smart-budget" data-step-direction="-1" aria-label="Decrease premium budget by 100 rupees">−</button><input id="smart-budget" type="number" min="0" max="10000000" step="100" value="6000" /><button class="picker-step-button" type="button" data-step-target="smart-budget" data-step-direction="1" aria-label="Increase premium budget by 100 rupees">+</button></div>
               </div>
             </div>
             <div id="smart-result" class="smart-result" hidden>
@@ -3732,11 +3737,11 @@
             <div class="strangle-inputs">
               <div class="field">
                 <label for="strangle-otm">Strike offset · points</label>
-                <input id="strangle-otm" type="number" min="-10000" max="10000" step="50" value="250" />
+                <div class="picker-stepper"><button class="picker-step-button" type="button" data-step-target="strangle-otm" data-step-direction="-1" aria-label="Decrease strike offset">−</button><input id="strangle-otm" type="number" min="-10000" max="10000" step="50" value="250" /><button class="picker-step-button" type="button" data-step-target="strangle-otm" data-step-direction="1" aria-label="Increase strike offset">+</button></div>
               </div>
               <div class="field">
                 <label for="strangle-budget">Total premium budget · ₹</label>
-                <input id="strangle-budget" type="number" min="100" max="10000000" step="100" value="6000" />
+                <div class="picker-stepper"><button class="picker-step-button" type="button" data-step-target="strangle-budget" data-step-direction="-1" aria-label="Decrease premium budget by 100 rupees">−</button><input id="strangle-budget" type="number" min="100" max="10000000" step="100" value="6000" /><button class="picker-step-button" type="button" data-step-target="strangle-budget" data-step-direction="1" aria-label="Increase premium budget by 100 rupees">+</button></div>
               </div>
             </div>
             <section id="strangle-result" class="strangle-result" hidden>
@@ -3752,11 +3757,11 @@
             <div class="strangle-inputs">
               <div class="field">
                 <label for="simple-strangle-otm">Strike offset · points</label>
-                <input id="simple-strangle-otm" type="number" min="-10000" max="10000" step="50" value="250" />
+                <div class="picker-stepper"><button class="picker-step-button" type="button" data-step-target="simple-strangle-otm" data-step-direction="-1" aria-label="Decrease strike offset">−</button><input id="simple-strangle-otm" type="number" min="-10000" max="10000" step="50" value="250" /><button class="picker-step-button" type="button" data-step-target="simple-strangle-otm" data-step-direction="1" aria-label="Increase strike offset">+</button></div>
               </div>
               <div class="field">
                 <label for="simple-strangle-lots">Lots · each leg</label>
-                <input id="simple-strangle-lots" type="number" min="1" max="10000" step="1" value="1" />
+                <div class="picker-stepper"><button class="picker-step-button" type="button" data-step-target="simple-strangle-lots" data-step-direction="-1" aria-label="Decrease lots per leg">−</button><input id="simple-strangle-lots" type="number" min="1" max="10000" step="1" value="1" /><button class="picker-step-button" type="button" data-step-target="simple-strangle-lots" data-step-direction="1" aria-label="Increase lots per leg">+</button></div>
               </div>
             </div>
             <section id="simple-strangle-result" hidden>

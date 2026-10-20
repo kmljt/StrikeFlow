@@ -226,6 +226,53 @@ $("option-type-select").addEventListener("change", () => {
 });
 $("strike-input").addEventListener("input", scheduleManualOptionPreview);
 $("lots").addEventListener("input", scheduleManualOptionPreview);
+function syncStepButtons(targetId) {
+  const input = $(targetId);
+  document
+    .querySelectorAll(`.picker-step-button[data-step-target="${targetId}"]`)
+    .forEach((button) => {
+      const direction = Number(button.dataset.stepDirection),
+        strikes = targetId === "strike-input" ? listedStrikes() : [],
+        strikeIndex = strikes.indexOf(Number(input.value)),
+        next = Number(input.value || input.min || 0) +
+          direction * Number(input.step || 1),
+        min = input.min === "" ? -Infinity : Number(input.min),
+        max = input.max === "" ? Infinity : Number(input.max);
+      button.disabled =
+        input.disabled ||
+        (strikes.length
+          ? strikeIndex < 0 ||
+            strikeIndex + direction < 0 ||
+            strikeIndex + direction >= strikes.length
+          : next < min || next > max);
+    });
+}
+document.querySelectorAll(".picker-step-button").forEach((button) => {
+  const input = $(button.dataset.stepTarget);
+  input.addEventListener("input", () => syncStepButtons(input.id));
+  input.addEventListener("change", () => syncStepButtons(input.id));
+  button.addEventListener("click", () => {
+    if (input.disabled) return;
+    const direction = Number(button.dataset.stepDirection),
+      step = Number(input.step || 1),
+      min = input.min === "" ? -Infinity : Number(input.min),
+      max = input.max === "" ? Infinity : Number(input.max),
+      current = Number(input.value || input.min || 0),
+      strikes = input.id === "strike-input" ? listedStrikes() : [],
+      strikeIndex = strikes.indexOf(current),
+      next = strikes.length
+        ? strikes[strikeIndex + direction]
+        : Math.max(min, Math.min(max, current + direction * step));
+    if (next === current) return;
+    input.value = String(next);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  syncStepButtons(input.id);
+});
+$("strike-input").addEventListener("input", () =>
+  syncStepButtons("strike-input"),
+);
 $("strike-input").addEventListener("change", () => {
   const value = Number($("strike-input").value);
   if (Number.isFinite(value)) setManualStrike(Math.round(value / 50) * 50);
@@ -242,6 +289,7 @@ dateField.addEventListener("change", () => {
   else {
     $("option-type-select").disabled = true;
     $("strike-input").disabled = true;
+    syncStepButtons("strike-input");
     window.expiryOptions = [];
   }
   $("error").hidden = true;
@@ -1848,6 +1896,7 @@ async function loadOptionContracts() {
 function setManualControlsEnabled(enabled) {
   $("option-type-select").disabled = !enabled;
   $("strike-input").disabled = !enabled;
+  syncStepButtons("strike-input");
 }
 function listedStrikes(type = $("option-type-select").value) {
   return [...new Set((window.expiryOptions || [])
@@ -1865,6 +1914,7 @@ function configureManualOptionFields(position = null) {
       : Math.round(referenceClose / 50) * 50);
   $("option-type-select").value = type;
   $("lots").value = String(position?.lots || $("lots").value || 1);
+  $("lots").dispatchEvent(new Event("input", { bubbles: true }));
   setManualStrike(target);
   scheduleManualOptionPreview();
 }
@@ -1872,6 +1922,7 @@ function setManualStrike(target = null) {
   const strikes = listedStrikes();
   if (!strikes.length) {
     $("strike-input").value = "";
+    syncStepButtons("strike-input");
     return;
   }
   const desired = target !== null && target !== undefined && Number.isFinite(Number(target))
@@ -1883,6 +1934,7 @@ function setManualStrike(target = null) {
     Math.abs(value - desired) < Math.abs(best - desired) ? value : best,
   );
   $("strike-input").value = String(strike);
+  syncStepButtons("strike-input");
 }
 function scheduleManualOptionPreview() {
   clearTimeout(manualOptionPreviewDebounce);
