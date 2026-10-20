@@ -3150,8 +3150,10 @@
       .baskets{gap:13px}
       .basket{padding:16px 18px;border-radius:14px;transition:border-color .16s ease,box-shadow .16s ease,background .16s ease}
       .basket:hover{transform:none}
-      @media (hover: none) {
-        .basket:hover {
+      @media (hover: none), (pointer: coarse) {
+        .basket:hover,
+        .basket:has(.scenario-control:active),
+        .basket:has(.scenario-control:focus) {
           background: linear-gradient(
             120deg,
             color-mix(in srgb, var(--basket-color) 6%, #090a0c),
