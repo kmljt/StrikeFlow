@@ -590,6 +590,60 @@ function renderBaskets() {
     pnl.textContent = valid ? signed(result.ending) : "—";
     if (valid && result.ending !== 0)
       pnl.classList.add(result.ending > 0 ? "green" : "red");
+    const callLegs = b.items.filter((item) => item.optionType === "CE"),
+      putLegs = b.items.filter((item) => item.optionType === "PE"),
+      structure = document.createElement("div");
+    if (callLegs.length === 1 && putLegs.length === 1) {
+      structure.className = "basket-structure";
+      const reference = valid ? Number(result.scenario?.previousClose) : NaN,
+        put = putLegs[0],
+        call = callLegs[0],
+        addStructureMetric = (labelText, valueText, toneClass = "") => {
+          const metric = document.createElement("div"),
+            label = document.createElement("span"),
+            value = document.createElement("strong");
+          metric.className = `basket-structure-item${toneClass ? ` ${toneClass}` : ""}`;
+          label.textContent = labelText;
+          value.textContent = valueText;
+          label.className = "basket-structure-label";
+          value.className = "basket-structure-value";
+          metric.append(label, value);
+          structure.append(metric);
+        },
+        formatOffset = (offset) =>
+          offset === 0
+            ? "ATM"
+            : `${Math.abs(Math.round(offset)).toLocaleString("en-IN")} ${offset > 0 ? "OTM" : "ITM"}`;
+      const putOffset = reference - put.strike,
+        callOffset = call.strike - reference,
+        toneForOffset = (offset) =>
+          !Number.isFinite(offset) || offset === 0
+            ? "is-neutral"
+            : offset > 0
+              ? "is-otm"
+              : "is-profit";
+      addStructureMetric(
+        `PUT ${Number(put.strike).toLocaleString("en-IN")}`,
+        Number.isFinite(reference) ? formatOffset(putOffset) : "—",
+        toneForOffset(putOffset),
+      );
+      addStructureMetric(
+        `CALL ${Number(call.strike).toLocaleString("en-IN")}`,
+        Number.isFinite(reference) ? formatOffset(callOffset) : "—",
+        toneForOffset(callOffset),
+      );
+      addStructureMetric(
+        "STRIKE WIDTH",
+        Math.abs(call.strike - put.strike).toLocaleString("en-IN"),
+        "is-width",
+      );
+      const basis = document.createElement("span");
+      basis.className = "basket-structure-reference";
+      basis.textContent = Number.isFinite(reference)
+        ? `NIFTY prior close ₹${reference.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`
+        : "NIFTY prior close unavailable";
+      structure.append(basis);
+    }
     const plus = document.createElement("button");
     plus.className = "button secondary add-option-button";
     plus.type = "button";
@@ -1014,7 +1068,9 @@ function renderBaskets() {
         });
       }
     }
-    card.append(head, metrics, performance, list, scenarioPanel);
+    card.append(head);
+    if (structure.childElementCount) card.append(structure);
+    card.append(metrics, performance, list, scenarioPanel);
     host.append(card);
     const scenarioRef = window.scenarioChartRefs.at(-1);
     if (scenarioRef?.canvas.closest(".basket") === card)
@@ -1740,6 +1796,24 @@ function basketInfoName(entry) {
   const basket = state.baskets.find((candidate) => candidate.id === entry.id);
   return basket ? basketDisplayName(basket) : entry.name;
 }
+function graphBasketName(entry) {
+  const basket = state.baskets.find((candidate) => candidate.id === entry.id),
+    items = basket?.items || [],
+    calls = items.filter((item) => item.optionType === "CE"),
+    puts = items.filter((item) => item.optionType === "PE");
+  if (calls.length === 1 && puts.length === 1) {
+    const callStrike = Number(calls[0].strike),
+      putStrike = Number(puts[0].strike),
+      width = Math.abs(callStrike - putStrike),
+      name = callStrike === putStrike
+        ? "Straddle"
+        : callStrike < putStrike
+          ? "Reverse Strangle"
+          : "Strangle";
+    return `${name} · ${width.toLocaleString("en-IN")}`;
+  }
+  return minimalBasketName(basketInfoName(entry));
+}
 function updateUpstoxStatus(label = null) {
   const button = $("upstox-status");
   if (!button) return;
@@ -2430,7 +2504,14 @@ function buildScenario(basket, positions, indexPoints, day, fallbackVol = 0.2) {
       .sort((a, b) => a - b)
       .filter((spot, i, all) => i === 0 || spot - all[i - 1] > 1e-8),
     points = spots.map((spot) => ({ spot, pnl: scenarioPnlAt(legs, spot) }));
-  return { actualSpot, points, legs, fallbackCount, fallbackVol };
+  return {
+    actualSpot,
+    previousClose: Number(indexPoints.previousClose) || actualSpot,
+    points,
+    legs,
+    fallbackCount,
+    fallbackVol,
+  };
 }
 function combineBasket(results) {
   const times = [
@@ -2732,7 +2813,7 @@ function renderLegend(data) {
         value = document.createElement("strong"),
         change = document.createElement("small");
       dot.style.background = b.color;
-      name.textContent = basketInfoName(b);
+      name.textContent = graphBasketName(b);
       value.textContent = signed(b.ending);
       value.className = b.ending >= 0 ? "green" : "red";
       change.className = `legend-change ${b.percent >= 0 ? "green" : "red"}`;
@@ -3109,7 +3190,7 @@ function drawMiniPlots(data) {
         change = document.createElement("small"),
         value = s.values.at(-1) || 0;
       dot.style.background = s.color;
-      name.textContent = basketInfoName(s);
+      name.textContent = graphBasketName(s);
       change.className = `legend-change ${value >= 0 ? "green" : "red"}`;
       change.textContent = `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
       item.append(dot, name, change);
@@ -3383,7 +3464,7 @@ function showMiniHover(e) {
       label.textContent =
         mode === "price"
           ? s.name
-          : minimalBasketName(basketInfoName(s));
+          : graphBasketName(s);
       label.style.color = s.color;
       if (mode === "price") {
         const value = document.createElement("div");
@@ -3466,7 +3547,7 @@ function showChartHover(e) {
       row.className = "tooltip-row";
       const label = document.createElement("span");
       label.className = "tooltip-basket-name";
-      label.textContent = minimalBasketName(basketInfoName(b));
+      label.textContent = graphBasketName(b);
       label.style.color = b.color;
       const value = document.createElement("div");
       value.className = "tooltip-basket-value";
