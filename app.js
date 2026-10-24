@@ -2689,12 +2689,24 @@ function buildScenario(basket, positions, indexPoints, day, fallbackVol = 0.2) {
       anchorAdjustment: result.close - modelAtClose,
     });
   }
-  const strikes = legs.map((x) => x.strike),
+  const callLeg = legs.find((leg) => leg.type === "CE" || leg.type === "call"),
+    putLeg = legs.find((leg) => leg.type === "PE" || leg.type === "put"),
+    strangleCenter =
+      callLeg && putLeg ? (callLeg.strike + putLeg.strike) / 2 : actualSpot,
+    strikes = legs.map((x) => x.strike),
     min = Math.max(
       1,
-      Math.min(actualSpot * 0.9, ...strikes.map((x) => x * 0.92)),
+      Math.min(
+        strangleCenter - 1000,
+        actualSpot * 0.9,
+        ...strikes.map((x) => x * 0.92),
+      ),
     ),
-    max = Math.max(actualSpot * 1.1, ...strikes.map((x) => x * 1.08)),
+    max = Math.max(
+      strangleCenter + 1000,
+      actualSpot * 1.1,
+      ...strikes.map((x) => x * 1.08),
+    ),
     spots = Array.from({ length: 121 }, (_, i) => min + ((max - min) * i) / 120)
       .concat(actualSpot)
       .sort((a, b) => a - b)
@@ -2702,6 +2714,7 @@ function buildScenario(basket, positions, indexPoints, day, fallbackVol = 0.2) {
     points = spots.map((spot) => ({ spot, pnl: scenarioPnlAt(legs, spot) }));
   return {
     actualSpot,
+    strangleCenter,
     previousClose: Number(indexPoints.previousClose) || actualSpot,
     points,
     legs,
@@ -3058,8 +3071,10 @@ function defaultScenarioView(scenario) {
   const points = scenario.points,
     min = points[0].spot,
     max = points.at(-1).spot,
-    center = scenario.actualSpot;
-  return [Math.max(min, center - 1000), Math.min(max, center + 1000)];
+    center = scenario.strangleCenter ?? scenario.actualSpot,
+    span = Math.min(2000, max - min),
+    lo = Math.max(min, Math.min(max - span, center - span / 2));
+  return [lo, lo + span];
 }
 function setScenarioView(ref, lo, hi) {
   const points = ref.scenario.points,
@@ -3081,7 +3096,7 @@ function setScenarioView(ref, lo, hi) {
 }
 function zoomScenario(ref, factor, center) {
   const [lo, hi] = ref.view;
-  center ??= ref.actualSpot;
+  center ??= ref.scenario.strangleCenter ?? ref.actualSpot;
   const next = (hi - lo) * factor;
   setScenarioView(
     ref,
@@ -3180,6 +3195,57 @@ function drawScenarioChart(
     ctx.moveTo(actualX, p.t);
     ctx.lineTo(actualX, h - p.b);
     ctx.stroke();
+    ctx.restore();
+  }
+  const strangleCenter = scenario.strangleCenter;
+  if (
+    Number.isFinite(strangleCenter) &&
+    strangleCenter !== actualSpot &&
+    strangleCenter >= lo &&
+    strangleCenter <= hi
+  ) {
+    const centerX = Xspot(strangleCenter);
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = "#a100ff36";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(centerX, p.t);
+    ctx.lineTo(centerX, h - p.b);
+    ctx.stroke();
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = "#c05aff";
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.moveTo(centerX, p.t);
+    ctx.lineTo(centerX, h - p.b);
+    ctx.stroke();
+    const label = "CENTER",
+      labelWidth = 43,
+      labelHeight = 15,
+      labelX = Math.max(
+        p.l + labelWidth / 2,
+        Math.min(w - p.r - labelWidth / 2, centerX),
+      );
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#17101e";
+    ctx.strokeStyle = "#a100ff70";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(
+      labelX - labelWidth / 2,
+      p.t + 3,
+      labelWidth,
+      labelHeight,
+      5,
+    );
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#d7aaff";
+    ctx.font = "700 8px system-ui";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, labelX, p.t + 3 + labelHeight / 2);
     ctx.restore();
   }
   if (hoverPoint && hoverPoint.spot >= lo && hoverPoint.spot <= hi) {
