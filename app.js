@@ -209,6 +209,23 @@ $("expiry").addEventListener("change", scheduleSimpleStrangle);
 dateField.addEventListener("change", scheduleSmartStrangle);
 dateField.addEventListener("change", scheduleSimpleStrangle);
 $("basket-dialog").addEventListener("close", finishBasketDialog);
+document.querySelectorAll(".contents-close,.basket-contents-done").forEach((button) =>
+  button.addEventListener("click", () => $("basket-contents-dialog").close()),
+);
+$("basket-contents-name").addEventListener("change", () => {
+  const basket = state.baskets.find((item) => item.id === window.contentsBasketId);
+  const name = $("basket-contents-name").value.trim();
+  if (!basket || !name) {
+    renderBasketContentsDialog();
+    return;
+  }
+  basket.name = name;
+  basket.customName = true;
+  saveState();
+  renderBaskets();
+  renderBasketContentsDialog();
+  scheduleRefresh();
+});
 $("option-cancel").addEventListener("click", () => $("option-dialog").close());
 $("option-dialog-form").addEventListener("submit", (e) => {
   e.preventDefault();
@@ -531,6 +548,10 @@ function intradayStats(points) {
 }
 function renderBaskets() {
   const host = $("baskets");
+  const focusedLabel = host.contains(document.activeElement)
+      ? document.activeElement.getAttribute("aria-label")
+      : null,
+    scrollPosition = window.scrollY;
   host.replaceChildren();
   window.scenarioChartRefs = [];
   sortBasketInfo(state.baskets).forEach((b) => {
@@ -575,7 +596,7 @@ function renderBaskets() {
     basketToggle.addEventListener("change", () => {
       b.enabled = basketToggle.checked;
       saveState();
-      invalidateResults();
+      scheduleRefresh();
     });
     const title = document.createElement("h2");
     title.textContent = displayName;
@@ -633,8 +654,8 @@ function renderBaskets() {
         toneForOffset(callOffset),
       );
       addStructureMetric(
-        "STRIKE WIDTH",
-        Math.abs(call.strike - put.strike).toLocaleString("en-IN"),
+        "CENTER ± OTM",
+        `${((Number(call.strike) + Number(put.strike)) / 2).toLocaleString("en-IN", { maximumFractionDigits: 2 })} ± ${(Math.abs(Number(call.strike) - Number(put.strike)) / 2).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`,
         "is-width",
       );
       const basis = document.createElement("span");
@@ -645,11 +666,16 @@ function renderBaskets() {
       structure.append(basis);
     }
     const plus = document.createElement("button");
-    plus.className = "button secondary add-option-button";
     plus.type = "button";
+    plus.className = "button secondary add-option-button";
     plus.textContent = "＋ Add option";
     plus.setAttribute("aria-label", `Add option to ${displayName}`);
     plus.addEventListener("click", () => openOptionDialog(b.id));
+    const manageContents = document.createElement("button");
+    manageContents.type = "button";
+    manageContents.className = "tiny-button";
+    setActionIcon(manageContents, "edit", `Edit ${displayName}`);
+    manageContents.addEventListener("click", () => openBasketContentsDialog(b.id));
     const colorPicker = document.createElement("label");
     colorPicker.className = "basket-color-picker";
     colorPicker.title = `Choose ${displayName} accent color`;
@@ -702,11 +728,6 @@ function renderBaskets() {
       );
       refreshBasketColors();
     });
-    const rename = document.createElement("button");
-    rename.className = "tiny-button";
-    rename.type = "button";
-    setActionIcon(rename, "edit", `Rename ${displayName}`);
-    rename.addEventListener("click", () => openBasketDialog(b.id));
     const del = document.createElement("button");
     del.className = "tiny-button remove-basket-button";
     del.style.color = "var(--red)";
@@ -720,7 +741,7 @@ function renderBaskets() {
     });
     const actions = document.createElement("div");
     actions.className = "basket-head-actions";
-    actions.append(colorPicker, randomColor, plus, rename, del);
+    actions.append(colorPicker, randomColor, plus, manageContents, del);
     const spacer = document.createElement("span");
     spacer.className = "spacer";
     head.append(basketToggle, title, count, pnlLabel, pnl, spacer, actions);
@@ -818,13 +839,47 @@ function renderBaskets() {
       optionToggle.addEventListener("change", () => {
         position.enabled = optionToggle.checked;
         saveState();
-        invalidateResults();
+        scheduleRefresh();
       });
       const info = document.createElement("div");
       info.className = "instrument-info";
+      const titleLine = document.createElement("div");
+      titleLine.className = "instrument-title-line";
       const label = document.createElement("span");
-      label.textContent = `${positionName(position)} · ${position.lots} lot${position.lots === 1 ? "" : "s"} × 65`;
-      info.append(label);
+      label.className = "instrument-name";
+      label.textContent = positionName(position);
+      const lotControl = document.createElement("div");
+      lotControl.className = "lot-size-control";
+      const lotCount = document.createElement("span");
+      lotCount.className = "lot-size-count";
+      const updateLotControl = () => {
+        lotCount.textContent = `${position.lots} lot${position.lots === 1 ? "" : "s"} × 65`;
+        decrement.disabled = position.lots <= 1;
+      };
+      const changeLots = (delta) => {
+        const nextLots = position.lots + delta;
+        if (!Number.isInteger(nextLots) || nextLots < 1) return;
+        position.lots = nextLots;
+        updateLotControl();
+        saveState();
+        scheduleRefresh();
+      };
+      const decrement = document.createElement("button");
+      decrement.type = "button";
+      decrement.className = "lot-size-button";
+      decrement.textContent = "−";
+      decrement.setAttribute("aria-label", `Remove one lot from ${positionName(position)}`);
+      decrement.addEventListener("click", () => changeLots(-1));
+      const increment = document.createElement("button");
+      increment.type = "button";
+      increment.className = "lot-size-button";
+      increment.textContent = "+";
+      increment.setAttribute("aria-label", `Add one lot to ${positionName(position)}`);
+      increment.addEventListener("click", () => changeLots(1));
+      lotControl.append(decrement, lotCount, increment);
+      titleLine.append(label, lotControl);
+      info.append(titleLine);
+      updateLotControl();
       const instrumentResult = valid
         ? result.positions.find((x) => x.index === i)
         : null;
@@ -880,24 +935,8 @@ function renderBaskets() {
         detail.append(prices, change);
         info.append(detail);
       }
-      const edit = document.createElement("button");
-      edit.className = "remove-item edit-item";
-      edit.type = "button";
-      setActionIcon(edit, "edit", `Edit ${positionName(position)}`);
-      edit.addEventListener("click", () => openOptionDialog(b.id, i));
-      const remove = document.createElement("button");
-      remove.className = "remove-item";
-      remove.type = "button";
-      setActionIcon(remove, "remove", `Remove ${positionName(position)}`);
-      remove.addEventListener("click", () => {
-        invalidateResults();
-        b.items.splice(i, 1);
-        saveState();
-        renderBaskets();
-      });
       row.append(optionToggle, info);
       if (positionTotals) row.append(positionTotals);
-      row.append(edit, remove);
       list.append(row);
     });
     const scenarioPanel = document.createElement("section");
@@ -1083,6 +1122,14 @@ function renderBaskets() {
         scenarioRef.view,
       );
   });
+  if (focusedLabel) {
+    const nextFocus = [...host.querySelectorAll("[aria-label]")].find(
+      (element) => element.getAttribute("aria-label") === focusedLabel,
+    );
+    nextFocus?.focus({ preventScroll: true });
+  }
+  window.scrollTo(window.scrollX, scrollPosition);
+  if ($("basket-contents-dialog").open) renderBasketContentsDialog();
 }
 function invalidateResults() {
   window.basketPnlResults = {};
@@ -1399,6 +1446,145 @@ function openBasketDialog(id) {
   $("basket-name").value = basketDisplayName(basket);
   $("basket-dialog").showModal();
   $("basket-name").focus();
+}
+function openBasketContentsDialog(id) {
+  window.contentsBasketId = id;
+  renderBasketContentsDialog();
+  $("basket-contents-dialog").showModal();
+}
+function renderBasketContentsDialog() {
+  const basket = state.baskets.find((item) => item.id === window.contentsBasketId);
+  if (!basket) return;
+  $("basket-contents-title").textContent = `${basketDisplayName(basket)} · contents`;
+  const nameInput = $("basket-contents-name");
+  if (document.activeElement !== nameInput) nameInput.value = basketDisplayName(basket);
+  const host = $("basket-contents-list");
+  host.replaceChildren();
+  if (!basket.items.length) {
+    const empty = document.createElement("p");
+    empty.className = "basket-contents-empty";
+    empty.textContent = "No options in this basket yet.";
+    host.append(empty);
+  }
+  const result = window.basketPnlResults[basket.id];
+  const valid = result?.day === dateField.value;
+  basket.items.forEach((position, index) => {
+    const row = document.createElement("article");
+    row.className = "basket-contents-row";
+    const details = document.createElement("div");
+    details.className = "basket-contents-details";
+    const type = document.createElement("select");
+    type.className = "contents-type-select";
+    type.setAttribute("aria-label", `Option type for ${positionName(position)}`);
+    type.innerHTML = '<option value="CE">Call · CE</option><option value="PE">Put · PE</option>';
+    type.value = position.optionType;
+    type.addEventListener("change", () => {
+      position.optionType = type.value;
+      window.basketPnlResults[basket.id] = null;
+      saveState();
+      scheduleRefresh();
+      renderBasketContentsDialog();
+    });
+    const strike = document.createElement("div");
+    strike.className = "basket-contents-strike";
+    const strikeInput = document.createElement("input");
+    strikeInput.type = "number";
+    strikeInput.min = "50";
+    strikeInput.step = "50";
+    strikeInput.value = position.strike;
+    strikeInput.className = "contents-value-input contents-strike-input";
+    strikeInput.setAttribute("aria-label", `Strike for ${positionName(position)}`);
+    const strikeReadout = document.createElement("span");
+    strikeReadout.className = "contents-strike-readout mobile-only-control";
+    strikeReadout.textContent = Number(position.strike).toLocaleString("en-IN");
+    strikeInput.addEventListener("change", () => {
+      const next = Number(strikeInput.value);
+      if (!Number.isInteger(next) || next <= 0) {
+        renderBasketContentsDialog();
+        return;
+      }
+      position.strike = next;
+      window.basketPnlResults[basket.id] = null;
+      saveState();
+      scheduleRefresh();
+      renderBasketContentsDialog();
+    });
+    const changeStrike = (delta) => {
+      const next = Number(position.strike) + delta * 50;
+      if (!Number.isInteger(next) || next <= 0) return;
+      position.strike = next;
+      window.basketPnlResults[basket.id] = null;
+      saveState();
+      scheduleRefresh();
+      renderBasketContentsDialog();
+    };
+    for (const [label, delta] of [["−", -1], ["+", 1]]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "contents-step mobile-only-control";
+      button.textContent = label;
+      button.setAttribute("aria-label", `${delta < 0 ? "Lower" : "Raise"} strike for ${positionName(position)}`);
+      button.addEventListener("click", () => changeStrike(delta));
+      strike.append(button);
+    }
+    strike.insertBefore(strikeInput, strike.children[1]);
+    strike.insertBefore(strikeReadout, strikeInput.nextSibling);
+    details.append(type, strike);
+    const positionResult = valid
+      ? result.positions.find((item) => item.index === index)
+      : null;
+    const price = document.createElement("small");
+    price.className = "basket-contents-price";
+    price.textContent = positionResult
+      ? `${money(positionResult.buy)} → ${money(positionResult.close)}`
+      : "Price unavailable";
+    details.append(price);
+    const lots = document.createElement("div");
+    lots.className = "basket-contents-lots";
+    const count = document.createElement("span");
+    count.className = "contents-lots-count mobile-only-control";
+    count.textContent = `${position.lots} lot${position.lots === 1 ? "" : "s"}`;
+    const lotsInput = document.createElement("input");
+    lotsInput.type = "number";
+    lotsInput.min = "1";
+    lotsInput.step = "1";
+    lotsInput.value = position.lots;
+    lotsInput.className = "contents-value-input contents-lots-input";
+    lotsInput.setAttribute("aria-label", `Lots for ${positionName(position)}`);
+    lotsInput.addEventListener("change", () => {
+      const next = Number(lotsInput.value);
+      if (!Number.isInteger(next) || next < 1) {
+        renderBasketContentsDialog();
+        return;
+      }
+      position.lots = next;
+      saveState();
+      scheduleRefresh();
+      renderBasketContentsDialog();
+    });
+    const changeLots = (delta) => {
+      const next = position.lots + delta;
+      if (!Number.isInteger(next) || next < 1) return;
+      position.lots = next;
+      saveState();
+      scheduleRefresh();
+      renderBasketContentsDialog();
+    };
+    for (const [label, delta] of [["−", -1], ["+", 1]]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "contents-step mobile-only-control";
+      button.textContent = label;
+      button.setAttribute("aria-label", `${delta < 0 ? "Remove one lot from" : "Add one lot to"} ${positionName(position)}`);
+      button.disabled = delta < 0 && position.lots <= 1;
+      button.addEventListener("click", () => changeLots(delta));
+      lots.append(button);
+    }
+    lots.insertBefore(count, lots.children[1] || null);
+    lots.append(lotsInput);
+    row.append(details, lots);
+    host.append(row);
+  });
 }
 function updateOptionDialogHeading() {
   if (window.editPositionIndex === null || window.editPositionIndex === undefined) return;
@@ -1804,13 +1990,14 @@ function graphBasketName(entry) {
   if (calls.length === 1 && puts.length === 1) {
     const callStrike = Number(calls[0].strike),
       putStrike = Number(puts[0].strike),
-      width = Math.abs(callStrike - putStrike),
+      center = (callStrike + putStrike) / 2,
+      otmDistance = Math.abs(callStrike - putStrike) / 2,
       name = callStrike === putStrike
         ? "Straddle"
         : callStrike < putStrike
           ? "Reverse Strangle"
           : "Strangle";
-    return `${name} · ${width.toLocaleString("en-IN")}`;
+    return `${name} · ${center.toLocaleString("en-IN", { maximumFractionDigits: 2 })} ± ${otmDistance.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
   }
   return minimalBasketName(basketInfoName(entry));
 }
@@ -1935,8 +2122,10 @@ async function checkUpstox() {
   }
 }
 async function loadExpiries() {
-  const select = $("expiry");
+  const select = $("expiry"),
+    historyNote = $("expiry-history-note");
   select.disabled = true;
+  historyNote.hidden = true;
   select.replaceChildren(new Option("Loading expiries…", ""));
   try {
     const r = await fetch("/api/upstox/nifty-expiries"),
@@ -1948,6 +2137,11 @@ async function loadExpiries() {
         "Upstox returned no NIFTY 50 expiries. Check your token and try again.",
       );
     window.expiredOptionsAvailable = j.expiredAvailable;
+    if (j.expiredAvailable === false) {
+      historyNote.textContent =
+        j.expiredError || "Upstox could not load older expiry history.";
+      historyNote.hidden = false;
+    }
     renderExpiries();
     if (select.value) await loadOptionContracts();
     scheduleSmartStrangle();
@@ -1962,9 +2156,11 @@ async function loadExpiries() {
 }
 function renderExpiries() {
   const select = $("expiry"),
-    previous = select.value,
     day = dateField.value,
-    values = (window.availableExpiries || []).filter((d) => !day || d >= day);
+    values = [...new Set(window.availableExpiries || [])]
+      .filter((d) => !day || d >= day)
+      .sort()
+      .slice(0, 3);
   select.replaceChildren();
   if (!values.length) {
     select.add(
@@ -1993,7 +2189,7 @@ function renderExpiries() {
     ),
   );
   select.disabled = false;
-  select.value = values.includes(previous) ? previous : values[0];
+  select.value = values[0];
 }
 async function loadOptionContracts() {
   const expiry = $("expiry").value,
@@ -2562,7 +2758,7 @@ async function loadTrade(generation = ++requestGeneration) {
   $("output").hidden = !chartBaskets.length;
   if (chartBaskets.length) $("output").classList.add("loading");
   $("empty").hidden = true;
-  $("chart-tooltip").hidden = true;
+  setChartTooltipVisible($("chart-tooltip"), false);
   const ctx = chartCanvas.getContext("2d");
   ctx.clearRect(0, 0, chartCanvas.width, chartCanvas.height);
   try {
@@ -2686,9 +2882,6 @@ async function loadTrade(generation = ++requestGeneration) {
       window.chartXRange = xRange;
       $("title").textContent = "Options P&L";
       $("dates").textContent = formatDate(day);
-      $("chart-range").textContent = times.length
-        ? `${time(times[0])} – ${time(times.at(-1))} IST · ${interval.replace("minute", "-minute")}`
-        : "NIFTY 50 data unavailable";
       $("output").classList.remove("loading");
       window.chartData = null;
       window.miniChartData = {
@@ -2736,8 +2929,6 @@ async function loadTrade(generation = ++requestGeneration) {
     window.chartXRange = xRange;
     $("title").textContent = "Options P&L";
     $("dates").textContent = formatDate(day);
-    $("chart-range").textContent =
-      `${time(times[0])} – ${time(times.at(-1))} IST · ${interval.replace("minute", "-minute")}`;
     renderLegend(compared);
     $("output").classList.remove("loading");
     window.chartData = { times, series, baskets: compared, xRange };
@@ -2761,8 +2952,8 @@ async function loadNiftyOnly(day, interval, generation) {
   $("error").hidden = true;
   $("output").hidden = false;
   $("output").classList.add("loading");
-  $("chart-tooltip").hidden = true;
-  $("percent-tooltip").hidden = true;
+  setChartTooltipVisible($("chart-tooltip"), false);
+  setChartTooltipVisible($("percent-tooltip"), false);
   $("empty").textContent = "Add a basket to see P&L comparisons.";
   $("empty").hidden = false;
   $("basket-legend").replaceChildren();
@@ -2788,9 +2979,6 @@ async function loadNiftyOnly(day, interval, generation) {
     window.chartXRange = xRange;
     $("title").textContent = "Options P&L";
     $("dates").textContent = formatDate(day);
-    $("chart-range").textContent = times.length
-      ? `${time(times[0])} – ${time(times.at(-1))} IST · ${interval.replace("minute", "-minute")}`
-      : "NIFTY 50 data unavailable";
     $("output").classList.remove("loading");
     window.miniChartData = {
       index,
@@ -2810,15 +2998,15 @@ function renderLegend(data) {
       const item = document.createElement("span"),
         dot = document.createElement("i"),
         name = document.createElement("span"),
-        value = document.createElement("strong"),
+        amount = document.createElement("strong"),
         change = document.createElement("small");
       dot.style.background = b.color;
       name.textContent = graphBasketName(b);
-      value.textContent = signed(b.ending);
-      value.className = b.ending >= 0 ? "green" : "red";
+      amount.className = `legend-value ${b.ending >= 0 ? "green" : "red"}`;
+      amount.textContent = signed(b.ending);
       change.className = `legend-change ${b.percent >= 0 ? "green" : "red"}`;
       change.textContent = `${b.percent >= 0 ? "+" : ""}${b.percent.toFixed(2)}%`;
-      item.append(dot, name, value, change);
+      item.append(dot, name, amount, change);
       return item;
     }),
   );
@@ -3016,8 +3204,16 @@ function drawScenarioChart(
   }
 }
 function positionTopTooltip(tooltip, x, width, gap = 12) {
+  if (tooltip.classList.contains("chart-tooltip")) return;
   tooltip.style.left = `${x > width * 0.65 ? Math.max(8, x - tooltip.offsetWidth - gap) : Math.min(width - tooltip.offsetWidth - 8, x + gap)}px`;
   tooltip.style.top = "10px";
+}
+function setChartTooltipVisible(tooltip, visible) {
+  tooltip.hidden = !visible;
+  const placeholder = tooltip.parentElement?.querySelector(
+    ".chart-hover-placeholder",
+  );
+  if (placeholder) placeholder.hidden = visible;
 }
 function showScenarioHover(e, ref) {
   const rect = ref.canvas.getBoundingClientRect(),
@@ -3477,9 +3673,13 @@ function showMiniHover(e) {
         const change = document.createElement("small");
         change.className = "tooltip-basket-change";
         const previous = d.index.points.previousClose;
-        change.textContent = previous
-          ? `${s.values[i] >= previous ? "+" : ""}${(((s.values[i] - previous) / previous) * 100).toFixed(2)}%`
-          : "—";
+        if (previous) {
+          const changePercent = ((s.values[i] - previous) / previous) * 100;
+          change.classList.add(changePercent >= 0 ? "green" : "red");
+          change.textContent = `${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}%`;
+        } else {
+          change.textContent = "—";
+        }
         value.append(amount, change);
         row.append(label, value);
       } else {
@@ -3491,20 +3691,20 @@ function showMiniHover(e) {
       return row;
     }),
   );
-  tip.hidden = false;
+  setChartTooltipVisible(tip, true);
   positionTopTooltip(tip, x, rect.width);
-  $("chart-tooltip").hidden = true;
-  $("nifty-tooltip").hidden = mode !== "price";
-  $("percent-tooltip").hidden = mode !== "percent";
+  setChartTooltipVisible($("chart-tooltip"), false);
+  setChartTooltipVisible($("nifty-tooltip"), mode === "price");
+  setChartTooltipVisible($("percent-tooltip"), mode === "percent");
   if (window.chartData) draw(window.chartData);
   drawMiniPlots(d);
 }
 function clearMiniHover() {
   window.linkedHoverTime = null;
   window.hoverIndex = null;
-  $("nifty-tooltip").hidden = true;
-  $("percent-tooltip").hidden = true;
-  $("chart-tooltip").hidden = true;
+  setChartTooltipVisible($("nifty-tooltip"), false);
+  setChartTooltipVisible($("percent-tooltip"), false);
+  setChartTooltipVisible($("chart-tooltip"), false);
   if (window.chartData) draw(window.chartData);
   if (window.miniChartData) drawMiniPlots(window.miniChartData);
 }
@@ -3565,17 +3765,17 @@ function showChartHover(e) {
     }),
   );
   const tip = $("chart-tooltip");
-  tip.hidden = false;
+  setChartTooltipVisible(tip, true);
   positionTopTooltip(tip, x, rect.width);
-  $("nifty-tooltip").hidden = true;
-  $("percent-tooltip").hidden = true;
+  setChartTooltipVisible($("nifty-tooltip"), false);
+  setChartTooltipVisible($("percent-tooltip"), false);
   draw(d);
   if (window.miniChartData) drawMiniPlots(window.miniChartData);
 }
 function clearChartHover() {
   window.linkedHoverTime = null;
   window.hoverIndex = null;
-  $("chart-tooltip").hidden = true;
+  setChartTooltipVisible($("chart-tooltip"), false);
   if (window.chartData) draw(window.chartData);
   if (window.miniChartData) drawMiniPlots(window.miniChartData);
 }

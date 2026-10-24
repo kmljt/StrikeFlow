@@ -418,7 +418,8 @@ async function routeRequest(req, res) {
           }),
         )) || [];
       let expired = [],
-        expiredAvailable = true;
+        expiredAvailable = true,
+        expiredError = "";
       try {
         expired =
           (await upstoxGet(
@@ -427,8 +428,9 @@ async function routeRequest(req, res) {
             }),
           5000,
           )) || [];
-      } catch {
+      } catch (error) {
         expiredAvailable = false;
+        expiredError = error.message;
       }
       const dates = [
         ...new Set(
@@ -437,7 +439,11 @@ async function routeRequest(req, res) {
           ),
         ),
       ].sort();
-      return send(res, 200, { expiries: dates, expiredAvailable });
+      return send(res, 200, {
+        expiries: dates,
+        expiredAvailable,
+        expiredError,
+      });
     } catch (e) {
       return send(res, 502, { error: e.message });
     }

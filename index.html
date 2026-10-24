@@ -448,6 +448,8 @@
         font-size: 10px;
         white-space: nowrap;
       }
+      .tooltip-basket-change.green{color:var(--green)}
+      .tooltip-basket-change.red{color:var(--red)}
       @media (max-width: 700px) {
         .wrap {
           width: min(100% - 24px, 600px);
@@ -3596,6 +3598,56 @@
         .scenario-assumption-item>strong{font-size:13px}
         .error{font-size:16px}
       }
+      .instrument-title-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+      .instrument-name{font-size:12px;line-height:1.45;color:#e4e7e9;font-weight:570}
+      .lot-size-control{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto}
+      .lot-size-button{display:none;place-items:center;width:26px;height:26px;padding:0;border:1px solid #30343a;border-radius:7px;background:#101216;color:#cbd0d5;font:600 15px/1 system-ui,sans-serif;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+      .lot-size-button:hover:not(:disabled){border-color:var(--site-accent);color:var(--site-accent)}
+      .lot-size-button:focus-visible{outline:2px solid var(--site-accent);outline-offset:2px}
+      .lot-size-button:disabled{opacity:.38;cursor:default}
+      .lot-size-count{min-width:72px;text-align:center;color:#9aa1a9;font-size:11px;font-weight:600;white-space:nowrap}
+      @media(max-width:760px){.lot-size-button{display:grid}}
+      @media(max-width:620px){.instrument-title-line{gap:7px}.instrument-name{font-size:15px}.lot-size-button{width:30px;height:30px;font-size:17px}.lot-size-count{font-size:13px;min-width:82px}}
+      .chart-hover-readout{position:relative;z-index:12;height:0;min-width:0;margin:0}
+      .chart-hover-readout .chart-tooltip{position:absolute;right:0;bottom:8px;box-sizing:border-box;width:max-content;min-width:min(190px,100%);max-width:min(320px,calc(100vw - 32px));max-height:min(60vh,360px);overflow:auto;padding:8px 11px;pointer-events:none}
+      #basket-legend,#percent-legend{display:flex;flex-direction:column;align-items:stretch;gap:3px;margin:7px 4px 4px}
+      #basket-legend>span,#percent-legend>span{min-width:0;min-height:22px;gap:7px;padding:0;border:0;border-radius:0;background:none}
+      #basket-legend>span>span,#percent-legend>span>span{min-width:0;padding:0;border:0;border-radius:0;background:none;font-size:12px}
+      #basket-legend>span>i,#percent-legend>span>i{width:6px;height:6px;flex:0 0 6px}
+      #basket-legend .legend-change,#percent-legend .legend-change{margin-left:auto;font-size:12px;opacity:1}
+      #basket-legend .legend-value{margin-left:auto;font-size:12px;font-weight:700;white-space:nowrap}
+      #basket-legend .legend-change{margin-left:0}
+      .chart-hover-placeholder{display:none}
+      .expiry-history-note{display:block;margin-top:7px;color:#939ba4;font-size:11px;line-height:1.45}
+      .expiry-history-note[hidden]{display:none}
+      #basket-contents-dialog{width:min(620px,calc(100% - 28px));max-height:min(80vh,720px);padding:0;border:1px solid #343a42;border-radius:18px;background:#090b0e;color:var(--text);box-shadow:0 28px 90px #000c}
+      #basket-contents-dialog::backdrop{background:#000a;backdrop-filter:blur(4px)}
+      .basket-contents-shell{display:grid;gap:16px;padding:clamp(16px,4vw,24px)}
+      .basket-contents-header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+      .basket-contents-header h2{margin:0;min-width:0;font-size:clamp(18px,4vw,22px);overflow-wrap:anywhere}
+      .contents-close{width:36px;height:36px;border:1px solid #30353d;border-radius:10px;background:#101216;color:#aab1b8;font-size:23px;line-height:1;cursor:pointer}
+      .basket-contents-list{display:grid;gap:8px;max-height:min(55vh,500px);overflow:auto;overscroll-behavior:contain}
+      .basket-contents-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:14px;padding:12px;border:1px solid #252a31;border-radius:12px;background:#0d0f12}
+      .basket-contents-details{display:grid;gap:3px;min-width:0}
+      .basket-contents-details span,.basket-contents-empty{color:#89929c;font-size:12px}
+      .basket-contents-name-field{display:grid;gap:6px;color:#89929c;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+      .basket-contents-name-field input{width:100%;height:42px;padding:0 12px;border:1px solid #30353d;border-radius:10px;background:#0d0f12;color:#e8ebef;font:500 15px/1 system-ui,sans-serif;letter-spacing:normal;text-transform:none}
+      .basket-contents-details{grid-template-columns:minmax(110px,.8fr) auto;align-items:center;gap:8px}
+      .contents-type-select{width:100%;min-width:0;height:36px;padding:0 9px;border:1px solid #30353d;border-radius:9px;background:#111419;color:#e3e7eb;font:600 12px system-ui,sans-serif}
+      .basket-contents-strike{display:flex;align-items:center;gap:7px}
+      .contents-value-input{box-sizing:border-box;width:82px;height:34px;padding:0 6px;border:1px solid #30353d;border-radius:8px;background:#111419;color:#e3e7eb;text-align:center;font:650 13px system-ui,sans-serif}
+      .contents-lots-input{width:68px}
+      .contents-strike-readout{min-width:48px;justify-content:center;color:#e3e7eb;font-size:14px;font-weight:700}
+      .basket-contents-price{grid-column:1/-1;color:#8f99a3;font-size:12px;font-weight:550;line-height:1.35}
+      .basket-contents-details>span{grid-column:1/-1}
+      .basket-contents-lots{display:flex;align-items:center;gap:7px}
+      .contents-step{display:none;place-items:center;width:32px;height:32px;padding:0;border:1px solid #30353d;border-radius:9px;background:#111419;color:#e4e8ec;font-size:18px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+      .contents-step:disabled{opacity:.4;cursor:default}
+      .basket-contents-lots>span{min-width:48px;text-align:center;color:#c1c7ce;font-size:12px;font-weight:650}
+      .mobile-only-control{display:none!important}
+      .basket-contents-footer{display:flex;justify-content:flex-end;gap:8px;padding-top:2px}
+      @media(max-width:760px){.mobile-only-control{display:grid!important}.contents-lots-count,.contents-strike-readout{display:inline-flex!important}.contents-value-input{display:none!important}.basket-item{grid-template-columns:18px minmax(0,1fr)!important}}
+      @media(max-width:540px){#basket-contents-dialog{width:calc(100% - 20px);max-height:85vh;border-radius:15px}.basket-contents-shell{gap:12px;padding:15px}.basket-contents-row{grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:10px;padding:10px}.basket-contents-details{grid-template-columns:minmax(105px,.8fr) auto}.basket-contents-strike,.basket-contents-lots{align-self:start}.basket-contents-lots{grid-column:2;grid-row:1}.basket-contents-footer .button{min-height:42px}.basket-contents-details>span{font-size:11px}}
       @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
     </style>
   </head>
@@ -3635,45 +3687,53 @@
         </div>
         <section class="mini-plot">
           <h3>NIFTY 50</h3>
+          <div class="chart-hover-readout">
+            <span class="chart-hover-placeholder">Hover or drag on the graph to inspect</span>
+            <div id="nifty-tooltip" class="chart-tooltip" hidden>
+              <div id="nifty-tooltip-time" class="tooltip-time"></div>
+              <div id="nifty-tooltip-rows"></div>
+            </div>
+          </div>
           <div class="mini-chart-wrap">
             <canvas
               id="nifty-chart"
               aria-label="NIFTY 50 intraday price chart"
             ></canvas>
-            <div id="nifty-tooltip" class="chart-tooltip" hidden>
-              <div id="nifty-tooltip-time" class="tooltip-time"></div>
-              <div id="nifty-tooltip-rows"></div>
-            </div>
             <div id="nifty-empty" class="mini-empty" hidden></div>
           </div>
         </section>
         <section id="pnl-plot" class="main-plot">
           <h3>Basket P&amp;L (₹)</h3>
+          <div class="chart-hover-readout">
+            <span class="chart-hover-placeholder">Hover or drag on the graph to inspect</span>
+            <div id="chart-tooltip" class="chart-tooltip" hidden>
+              <div id="tooltip-time" class="tooltip-time"></div>
+              <div id="tooltip-rows"></div>
+            </div>
+          </div>
           <div class="chart-wrap">
             <canvas
               id="chart"
               aria-label="Basket P&L comparison chart"
             ></canvas>
-            <div id="chart-tooltip" class="chart-tooltip" hidden>
-              <div id="tooltip-time" class="tooltip-time"></div>
-              <div id="tooltip-rows"></div>
-            </div>
             <div id="empty" class="chart-empty" hidden></div>
           </div>
         </section>
         <div id="basket-legend" class="basket-legend"></div>
-        <div class="legend"><span id="chart-range"></span></div>
         <section id="percent-plot" class="mini-plot percent-plot">
           <h3>Basket change (%)</h3>
+          <div class="chart-hover-readout">
+            <span class="chart-hover-placeholder">Hover or drag on the graph to inspect</span>
+            <div id="percent-tooltip" class="chart-tooltip" hidden>
+              <div id="percent-tooltip-time" class="tooltip-time"></div>
+              <div id="percent-tooltip-rows"></div>
+            </div>
+          </div>
           <div class="mini-chart-wrap">
             <canvas
               id="percent-chart"
               aria-label="Basket percentage change chart"
             ></canvas>
-            <div id="percent-tooltip" class="chart-tooltip" hidden>
-              <div id="percent-tooltip-time" class="tooltip-time"></div>
-              <div id="percent-tooltip-rows"></div>
-            </div>
             <div id="percent-empty" class="mini-empty" hidden></div>
           </div>
           <div id="percent-legend" class="basket-legend mini-legend"></div>
@@ -3738,6 +3798,7 @@
           ><select id="expiry" disabled>
             <option value="">Option expiry unavailable</option>
           </select>
+          <small id="expiry-history-note" class="expiry-history-note" hidden></small>
         </div>
         <div class="basket-control-actions">
           <button id="new-basket" class="button secondary" type="button">
@@ -3799,6 +3860,19 @@
             ><button id="basket-save" class="button" value="save">Save</button>
           </div>
         </form>
+      </dialog>
+      <dialog id="basket-contents-dialog" aria-labelledby="basket-contents-title">
+        <section class="basket-contents-shell">
+          <header class="basket-contents-header">
+            <h2 id="basket-contents-title">Basket contents</h2>
+            <button class="contents-close" type="button" aria-label="Close contents editor">×</button>
+          </header>
+          <label class="basket-contents-name-field" for="basket-contents-name">Basket name<input id="basket-contents-name" maxlength="40" autocomplete="off" /></label>
+          <div id="basket-contents-list" class="basket-contents-list"></div>
+          <footer class="basket-contents-footer">
+            <button class="button secondary basket-contents-done" type="button">Done</button>
+          </footer>
+        </section>
       </dialog>
       <dialog id="option-dialog">
         <form id="option-dialog-form" novalidate>
