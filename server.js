@@ -618,6 +618,9 @@ async function routeRequest(req, res) {
     const expiry = url.searchParams.get("expiry"),
       day = url.searchParams.get("day"),
       otmPoints = Number(url.searchParams.get("otmPoints")),
+      requestedCenter = url.searchParams.has("center")
+        ? Number(url.searchParams.get("center"))
+        : null,
       lots = Number(url.searchParams.get("lots"));
     if (
       !/^\d{4}-\d{2}-\d{2}$/.test(expiry || "") ||
@@ -627,6 +630,11 @@ async function routeRequest(req, res) {
       otmPoints < -10000 ||
       otmPoints > 10000 ||
       otmPoints % 50 !== 0 ||
+      (requestedCenter !== null &&
+        (!Number.isInteger(requestedCenter) ||
+          requestedCenter < 50 ||
+          requestedCenter > 100000 ||
+          requestedCenter % 50 !== 0)) ||
       !Number.isInteger(lots) ||
       lots < 1 ||
       lots > 10000
@@ -641,10 +649,11 @@ async function routeRequest(req, res) {
       ]);
       if (!reference)
         throw new Error("Could not find NIFTY 50’s previous-session close for that day.");
+      const center = requestedCenter ?? Math.round(reference.close / 50) * 50;
       const expired = expiry < todayIST();
       const pickLeg = async (type) => {
         const target = Math.round(
-          (reference.close + (type === "CE" ? otmPoints : -otmPoints)) / 50,
+          (center + (type === "CE" ? otmPoints : -otmPoints)) / 50,
         ) * 50;
         const contract = contracts.find((item) =>
           item.instrument_type === type &&
@@ -673,6 +682,7 @@ async function routeRequest(req, res) {
       return send(res, 200, {
         expiry,
         day,
+        center,
         otmPoints,
         referenceClose: reference.close,
         referenceDate: reference.date,

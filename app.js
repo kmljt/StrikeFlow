@@ -185,6 +185,17 @@ let optionContractsRequest = 0;
 let manualOptionPreviewRequest = 0;
 let manualOptionPreviewDebounce = null;
 window.smartStrangleResult = null;
+const bulkOffsetOptions = $("simple-strangle-offset-options");
+for (let offset = -200; offset <= 1000; offset += 50) {
+  const label = document.createElement("label"),
+    checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.name = "simple-strangle-bulk-offset";
+  checkbox.value = String(offset);
+  checkbox.checked = offset === 250;
+  label.append(checkbox, document.createTextNode(Number(offset).toLocaleString("en-IN")));
+  bulkOffsetOptions.append(label);
+}
 $("new-basket").addEventListener("click", addBasket);
 $("new-strangle").addEventListener("click", openSmartStrangle);
 $("strangle-cancel").addEventListener("click", () => $("strangle-dialog").close());
@@ -202,8 +213,18 @@ document.querySelectorAll("[data-strangle-mode]").forEach((button) =>
 );
 for (const id of ["strangle-otm", "strangle-budget"])
   $(id).addEventListener("input", scheduleSmartStrangle);
-for (const id of ["simple-strangle-otm", "simple-strangle-lots"])
+for (const id of ["simple-strangle-center", "simple-strangle-otm", "simple-strangle-lots"])
   $(id).addEventListener("input", scheduleSimpleStrangle);
+$("simple-strangle-bulk").addEventListener("change", () => {
+  const enabled = $("simple-strangle-bulk").checked;
+  $("simple-strangle-bulk-offsets").hidden = !enabled;
+  $("simple-strangle-otm-field").hidden = enabled;
+  scheduleSimpleStrangle();
+});
+$("simple-strangle-bulk-offsets").addEventListener("change", (event) => {
+  if (event.target.matches('input[name="simple-strangle-bulk-offset"]'))
+    scheduleSimpleStrangle();
+});
 $("expiry").addEventListener("change", scheduleSmartStrangle);
 $("expiry").addEventListener("change", scheduleSimpleStrangle);
 dateField.addEventListener("change", scheduleSmartStrangle);
@@ -506,10 +527,23 @@ function renderCalendar() {
   }
   $("calendar-days").replaceChildren(...cells);
 }
-function scheduleRefresh() {
+function scheduleRefresh({ renderBasketCards = true } = {}) {
   clearTimeout(refreshTimer);
   const generation = ++requestGeneration;
-  refreshTimer = setTimeout(() => loadTrade(generation), 250);
+  refreshTimer = setTimeout(
+    () => loadTrade(generation, renderBasketCards),
+    250,
+  );
+}
+function renderRefreshedBaskets(mode) {
+  if (mode === false) return;
+  renderBaskets(
+    typeof mode === "string"
+      ? { onlyBasketId: mode }
+      : Array.isArray(mode)
+        ? { onlyBasketIds: mode }
+        : undefined,
+  );
 }
 function percentChange(from, to) {
   return from
@@ -546,15 +580,43 @@ function intradayStats(points) {
   }
   return { maxProfit, maxLoss, maxDrawdown };
 }
-function renderBaskets() {
+function renderBaskets(options = {}) {
   const host = $("baskets");
-  const focusedLabel = host.contains(document.activeElement)
+  const onlyBasketIds = options.onlyBasketIds ||
+      (options.onlyBasketId ? [options.onlyBasketId] : null),
+    incremental = Boolean(onlyBasketIds?.length),
+    oldCards = [...host.querySelectorAll(".basket[data-basket-id]")],
+    activeElement = document.activeElement,
+    focusedLabel = host.contains(activeElement)
       ? document.activeElement.getAttribute("aria-label")
       : null,
-    scrollPosition = window.scrollY;
-  host.replaceChildren();
-  window.scenarioChartRefs = [];
-  sortBasketInfo(state.baskets).forEach((b) => {
+    focusedBasketIndex = activeElement.closest?.(".basket")
+      ? oldCards.indexOf(activeElement.closest(".basket"))
+      : -1,
+    focusDeletedAction = activeElement.classList?.contains("remove-basket-button")
+      ? ".remove-basket-button"
+      : null,
+    scrollAnchors = oldCards
+      .map((card) => ({
+        id: card.dataset.basketId,
+        top: card.getBoundingClientRect().top,
+        bottom: card.getBoundingClientRect().bottom,
+      }))
+      .filter((card) => card.bottom > 0);
+  if (incremental) {
+    oldCards
+      .filter((card) => onlyBasketIds.includes(card.dataset.basketId))
+      .forEach((card) => card.remove());
+    window.scenarioChartRefs = window.scenarioChartRefs.filter((ref) =>
+      ref.canvas.isConnected,
+    );
+  } else {
+    host.replaceChildren();
+    window.scenarioChartRefs = [];
+  }
+  sortBasketInfo(state.baskets)
+    .filter((basket) => !incremental || onlyBasketIds.includes(basket.id))
+    .forEach((b) => {
     const index = state.baskets.indexOf(b);
     const result = window.basketPnlResults[b.id],
       valid = result?.day === dateField.value,
@@ -566,6 +628,7 @@ function renderBaskets() {
     };
     const card = document.createElement("section");
     card.className = "card basket";
+    card.dataset.basketId = b.id;
     card.style.setProperty(
       "--basket-color",
       basketColor(index, valid ? result.ending : 0, b.accentColor),
@@ -735,9 +798,23 @@ function renderBaskets() {
     setActionIcon(del, "remove", `Remove ${displayName}`);
     del.addEventListener("click", () => {
       state.baskets = state.baskets.filter((x) => x.id !== b.id);
-      invalidateResults();
       saveState();
-      renderBaskets();
+      delete window.basketPnlResults[b.id];
+      if (window.activeScenarioBasketId === b.id)
+        window.activeScenarioBasketId = null;
+      const cardsBefore = [...host.querySelectorAll(".basket[data-basket-id]")],
+        removedIndex = cardsBefore.indexOf(card);
+      card.remove();
+      window.scenarioChartRefs = window.scenarioChartRefs.filter((ref) =>
+        ref.canvas.isConnected,
+      );
+      const cards = [...host.querySelectorAll(".basket[data-basket-id]")],
+        nextCard = cards[Math.min(Math.max(0, removedIndex), cards.length - 1)];
+      nextCard?.querySelector(".remove-basket-button")?.focus({
+        preventScroll: true,
+      });
+      if (!nextCard) $("new-basket").focus({ preventScroll: true });
+      scheduleRefresh({ renderBasketCards: false });
     });
     const actions = document.createElement("div");
     actions.className = "basket-head-actions";
@@ -1121,14 +1198,36 @@ function renderBaskets() {
         null,
         scenarioRef.view,
       );
-  });
+    });
   if (focusedLabel) {
     const nextFocus = [...host.querySelectorAll("[aria-label]")].find(
       (element) => element.getAttribute("aria-label") === focusedLabel,
     );
     nextFocus?.focus({ preventScroll: true });
+    if (!nextFocus && focusDeletedAction) {
+      const cards = [...host.querySelectorAll(".basket[data-basket-id]")],
+        nextCard = cards[Math.min(Math.max(0, focusedBasketIndex), cards.length - 1)];
+      nextCard?.querySelector(focusDeletedAction)?.focus({ preventScroll: true });
+    }
   }
-  window.scrollTo(window.scrollX, scrollPosition);
+  const newCards = [...host.querySelectorAll(".basket[data-basket-id]")],
+    scrollAnchor = scrollAnchors.find((anchor) =>
+      newCards.some((card) => card.dataset.basketId === anchor.id),
+    );
+  if (scrollAnchor) {
+    const anchorElement = newCards.find(
+      (card) => card.dataset.basketId === scrollAnchor.id,
+    );
+    if (anchorElement) {
+      const delta = anchorElement.getBoundingClientRect().top - scrollAnchor.top;
+      if (Math.abs(delta) > 1)
+        window.scrollTo({
+          left: window.scrollX,
+          top: window.scrollY + delta,
+          behavior: "instant",
+        });
+    }
+  }
   if ($("basket-contents-dialog").open) renderBasketContentsDialog();
 }
 function invalidateResults() {
@@ -1150,20 +1249,21 @@ function nextBasketAccentColor() {
   return randomBrightHex();
 }
 function addBasket() {
-  invalidateResults();
   const n =
     state.baskets.reduce((max, b) => {
       const m = b.name.match(/^Basket\s+(\d+)$/i);
       return m ? Math.max(max, Number(m[1])) : max;
     }, 0) + 1;
-  state.baskets.push({
+  const basket = {
     id: `basket-${Date.now()}`,
     name: `Basket ${n}`,
     accentColor: nextBasketAccentColor(),
     items: [],
-  });
+  };
+  state.baskets.push(basket);
   saveState();
-  renderBaskets();
+  renderBaskets({ onlyBasketId: basket.id });
+  scheduleRefresh({ renderBasketCards: basket.id });
 }
 function nextBasketNumber() {
   return state.baskets.reduce((max, b) => {
@@ -1181,9 +1281,15 @@ function openSmartStrangle() {
   $("strangle-error").hidden = true;
   $("strangle-add").disabled = true;
   $("strangle-add").textContent = "Finding strikes…";
+  const cachedReference = window.niftyReferenceCloseDay === dateField.value
+    ? Number(window.niftyReferenceClose)
+    : NaN;
+  $("simple-strangle-center").value = Number.isFinite(cachedReference)
+    ? String(Math.round(cachedReference / 50) * 50)
+    : "";
   $("strangle-dialog").showModal();
   scheduleSimpleStrangle();
-  $("simple-strangle-otm").focus();
+  $("simple-strangle-center").focus();
 }
 function setStrangleMode(mode, refresh = true) {
   window.strangleMode = mode === "simple" ? "simple" : "smart";
@@ -1319,18 +1425,19 @@ function addSmartStrangle() {
     $("strangle-error").hidden = false;
     return;
   }
-  const basketNumber = nextBasketNumber();
-  invalidateResults();
-  state.baskets.push({
-    id: `basket-${Date.now()}`,
-    name: `Basket ${basketNumber}`,
-    customName: false,
-    enabled: true,
-    accentColor: nextBasketAccentColor(),
-    items,
-  });
+  const basketNumber = nextBasketNumber(),
+    basket = {
+      id: `basket-${Date.now()}`,
+      name: `Basket ${basketNumber}`,
+      customName: false,
+      enabled: true,
+      accentColor: nextBasketAccentColor(),
+      items,
+    };
+  state.baskets.push(basket);
   saveState();
-  renderBaskets();
+  renderBaskets({ onlyBasketId: basket.id });
+  scheduleRefresh({ renderBasketCards: basket.id });
   $("strangle-dialog").close();
   window.smartStrangleResult = null;
 }
@@ -1340,21 +1447,46 @@ function scheduleSimpleStrangle() {
   window.simpleStrangleResult = null;
   $("strangle-add").disabled = true;
   $("strangle-add").textContent = "Finding strikes…";
-  $("simple-strangle-result").classList.add("is-updating");
+  const bulk = $("simple-strangle-bulk").checked,
+    preview = $(bulk ? "simple-strangle-bulk-result" : "simple-strangle-result"),
+    singlePreview = $("simple-strangle-result"),
+    bulkPreview = $("simple-strangle-bulk-result");
+  singlePreview.hidden = bulk;
+  bulkPreview.hidden = !bulk;
+  singlePreview.classList.remove("is-updating", "has-error");
+  bulkPreview.classList.remove("is-updating", "has-error", "has-results");
+  bulkPreview.removeAttribute("data-status");
+  preview.hidden = false;
+  preview.setAttribute("aria-busy", "true");
+  preview.removeAttribute("data-status");
+  preview.classList.remove("has-error");
+  preview.classList.add("is-updating");
   $("strangle-error").hidden = true;
   if (!$("strangle-dialog").open || window.strangleMode !== "simple") return;
   const expiry = $("expiry").value,
     day = dateField.value,
+    centerInput = $("simple-strangle-center"),
+    rawCenter = centerInput.value.trim() === "" ? null : Number(centerInput.value),
     input = $("simple-strangle-otm"),
     offset = Number(input.value),
-    lots = Number($("simple-strangle-lots").value);
+    lots = Number($("simple-strangle-lots").value),
+    selectedOffsets = [...document.querySelectorAll('input[name="simple-strangle-bulk-offset"]:checked')]
+      .map((checkbox) => Number(checkbox.value));
   if (input.value.trim() !== "" && Number.isFinite(offset))
     input.value = String(Math.max(-10000, Math.min(10000, Math.round(offset / 50) * 50)));
-  if (!expiry || expiry < day || input.value.trim() === "" || !Number.isFinite(offset) || offset < -10000 || offset > 10000 || !Number.isInteger(lots) || lots < 1 || lots > 10000) {
+  if (!expiry || expiry < day || (rawCenter !== null && (!Number.isFinite(rawCenter) || rawCenter < 50 || rawCenter > 100000)) || (!bulk && (input.value.trim() === "" || !Number.isFinite(offset) || offset < -10000 || offset > 10000)) || (bulk && !selectedOffsets.length) || !Number.isInteger(lots) || lots < 1 || lots > 10000) {
+    preview.classList.remove("is-updating");
+    preview.classList.add("has-error");
+    preview.setAttribute("aria-busy", "false");
     if (!expiry || expiry < day) {
       $("strangle-error").textContent = "Choose an option expiry on or after the trading day.";
-      $("strangle-error").hidden = false;
+    } else {
+      $("strangle-error").textContent = bulk && !selectedOffsets.length
+        ? "Choose at least one strike offset."
+        : "Enter a valid center, strike offset, and lot count.";
     }
+    preview.setAttribute("data-status", $("strangle-error").textContent);
+    $("strangle-error").hidden = true;
     $("strangle-add").textContent = "Add strangle";
     return;
   }
@@ -1366,27 +1498,97 @@ async function findSimpleStrangle(requestId = ++simpleStrangleRequest) {
   if (window.strangleMode !== "simple") return;
   const expiry = $("expiry").value,
     day = dateField.value,
+    centerInput = $("simple-strangle-center"),
     input = $("simple-strangle-otm"),
+    bulkPreview = $("simple-strangle-bulk-result"),
     rawOffset = Number(input.value),
+    rawCenter = centerInput.value.trim() === "" ? null : Number(centerInput.value),
     lots = Number($("simple-strangle-lots").value),
+    center = rawCenter === null || !Number.isFinite(rawCenter)
+      ? null
+      : Math.max(50, Math.min(100000, Math.round(rawCenter / 50) * 50)),
+    bulk = $("simple-strangle-bulk").checked,
+    selectedOffsets = [...document.querySelectorAll('input[name="simple-strangle-bulk-offset"]:checked')]
+      .map((checkbox) => Number(checkbox.value)),
     offset = Number.isFinite(rawOffset) && rawOffset >= -10000
       ? Math.max(-10000, Math.min(10000, Math.round(rawOffset / 50) * 50))
       : null;
-  if (!expiry || expiry < day || offset === null || input.value.trim() === "" || !Number.isInteger(lots) || lots < 1 || lots > 10000) {
+  if (!expiry || expiry < day || (rawCenter !== null && (!Number.isFinite(rawCenter) || rawCenter < 50 || rawCenter > 100000)) || (!bulk && (offset === null || input.value.trim() === "")) || (bulk && !selectedOffsets.length) || !Number.isInteger(lots) || lots < 1 || lots > 10000) {
     $("strangle-add").disabled = true;
     $("strangle-add").textContent = "Add strangle";
     return;
   }
-  input.value = String(offset);
+  if (!bulk) input.value = String(offset);
+  if (center !== null) centerInput.value = String(center);
+  const activePreview = $(bulk ? "simple-strangle-bulk-result" : "simple-strangle-result");
+  activePreview.hidden = false;
+  activePreview.classList.remove("has-error");
+  activePreview.classList.add("is-updating");
+  activePreview.setAttribute("aria-busy", "true");
   $("strangle-add").disabled = true;
   $("strangle-add").textContent = "Finding strikes…";
   try {
-    const query = new URLSearchParams({ expiry, day, otmPoints: String(offset), lots: String(lots) }),
-      response = await fetch(`/api/upstox/nifty-simple-strangle?${query}`),
-      result = await response.json();
+    const fetchOffset = async (strikeOffset) => {
+      const params = { expiry, day, otmPoints: String(strikeOffset), lots: String(lots) };
+      if (center !== null) params.center = String(center);
+      const query = new URLSearchParams(params),
+        response = await fetch(`/api/upstox/nifty-simple-strangle?${query}`),
+        result = await response.json();
+      if (!response.ok) throw Error(result.error || "Could not find the matching call and put.");
+      if (!Number.isInteger(Number(result.center)) || (center !== null && Number(result.center) !== center))
+        throw Error("The selected NIFTY center was not applied. Please try again.");
+      return { ...result, offset: strikeOffset };
+    };
+    let result;
+    if (bulk) {
+      result = [];
+      for (let index = 0; index < selectedOffsets.length; index += 3) {
+        const batch = await Promise.all(
+          selectedOffsets.slice(index, index + 3).map(fetchOffset),
+        );
+        result.push(...batch);
+        if (requestId !== simpleStrangleRequest) return;
+      }
+    } else {
+      result = await fetchOffset(offset);
+    }
     if (requestId !== simpleStrangleRequest || window.strangleMode !== "simple") return;
-    if (!response.ok) throw Error(result.error || "Could not find the matching call and put.");
     window.simpleStrangleResult = result;
+    const resolvedCenter = bulk ? result[0]?.center : result.center;
+    if (center === null && Number.isInteger(Number(resolvedCenter)))
+      centerInput.value = String(resolvedCenter);
+    if (bulk) {
+      const list = $("simple-strangle-bulk-list");
+      list.replaceChildren(...result.map((pick) => {
+        const row = document.createElement("div"),
+          head = document.createElement("div"),
+          costs = document.createElement("div"),
+          label = document.createElement("strong"),
+          strikes = document.createElement("span"),
+          breakdown = document.createElement("span"),
+          cost = document.createElement("b");
+        row.className = "simple-strangle-bulk-row";
+        head.className = "simple-strangle-bulk-head";
+        costs.className = "simple-strangle-bulk-costs";
+        label.textContent = Number(pick.offset).toLocaleString("en-IN");
+        strikes.textContent = `${pick.put.strike} PE + ${pick.call.strike} CE`;
+        breakdown.className = "simple-strangle-bulk-breakdown";
+        breakdown.textContent = `${pick.put.estimatedCost === null ? "—" : formatSmartMoney(pick.put.estimatedCost)} + ${pick.call.estimatedCost === null ? "—" : formatSmartMoney(pick.call.estimatedCost)}`;
+        cost.textContent = pick.estimatedCost === null ? "—" : formatSmartMoney(pick.estimatedCost);
+        head.append(label, strikes);
+        costs.append(breakdown, cost);
+        row.append(head, costs);
+        return row;
+      }));
+      bulkPreview.classList.remove("is-updating", "has-error");
+      bulkPreview.classList.add("has-results");
+      bulkPreview.setAttribute("aria-busy", "false");
+      bulkPreview.removeAttribute("data-status");
+      $("strangle-error").hidden = true;
+      $("strangle-add").disabled = false;
+      $("strangle-add").textContent = `Add ${result.length} strangle${result.length === 1 ? "" : "s"}`;
+      return;
+    }
     const renderLeg = (prefix, leg) => {
       $(`simple-${prefix}-title`).textContent = `${leg.strike} ${leg.type} · ${leg.lots} lot${leg.lots === 1 ? "" : "s"}`;
       $(`simple-${prefix}-detail`).textContent = `${formatMoneyness(leg.actualOTM)} from prior close · ${leg.estimatedCost === null ? "previous close unavailable" : `${formatSmartMoney(leg.estimatedCost)} total`}`;
@@ -1396,8 +1598,9 @@ async function findSimpleStrangle(requestId = ++simpleStrangleRequest) {
     $("simple-total-value").textContent = result.estimatedCost === null
       ? "Unavailable"
       : formatSmartMoney(result.estimatedCost);
-    $("simple-strangle-result").hidden = false;
-    $("simple-strangle-result").classList.remove("is-updating");
+    $("simple-strangle-result").classList.remove("is-updating", "has-error");
+    $("simple-strangle-result").setAttribute("aria-busy", "false");
+    $("simple-strangle-result").removeAttribute("data-status");
     $("strangle-error").hidden = true;
     $("strangle-add").disabled = false;
     $("strangle-add").textContent = result.estimatedCost === null
@@ -1405,37 +1608,53 @@ async function findSimpleStrangle(requestId = ++simpleStrangleRequest) {
       : `Add strangle · ${formatSmartMoney(result.estimatedCost)}`;
   } catch (error) {
     if (requestId !== simpleStrangleRequest || window.strangleMode !== "simple") return;
+    const preview = bulk ? $("simple-strangle-bulk-result") : $("simple-strangle-result");
+    preview.classList.remove("is-updating");
+    preview.classList.add("has-error");
+    preview.setAttribute("aria-busy", "false");
     $("strangle-error").textContent = error.message || "Could not find the matching call and put.";
-    $("strangle-error").hidden = false;
+    preview.setAttribute("data-status", $("strangle-error").textContent);
+    $("strangle-error").hidden = true;
     $("strangle-add").textContent = "Add strangle";
   }
 }
 function addSimpleStrangle() {
   const pick = window.simpleStrangleResult;
   if (!pick || window.strangleMode !== "simple" || !$("strangle-dialog").open) return;
-  const items = [pick.call, pick.put].map((leg) => ({
-    expiry: pick.expiry,
-    strike: Number(leg.strike),
-    optionType: leg.type,
-    lots: Number(leg.lots),
-  }));
-  if (items.some((item) => !Number.isInteger(item.strike) || !["CE", "PE"].includes(item.optionType))) {
+  const picks = Array.isArray(pick) ? pick : [pick],
+    invalid = picks.some((selection) =>
+      [selection.call, selection.put].some((leg) =>
+        !Number.isInteger(Number(leg.strike)) ||
+        !["CE", "PE"].includes(leg.type) ||
+        !Number.isInteger(Number(leg.lots)) || Number(leg.lots) < 1,
+      ),
+    );
+  if (invalid) {
     $("strangle-error").textContent = "This strangle selection is no longer valid. Refresh the distance and try again.";
     $("strangle-error").hidden = false;
     return;
   }
-  const basketNumber = nextBasketNumber();
-  invalidateResults();
-  state.baskets.push({
-    id: `basket-${Date.now()}`,
-    name: `Basket ${basketNumber}`,
-    customName: false,
-    enabled: true,
-    accentColor: nextBasketAccentColor(),
-    items,
+  const newBaskets = picks.map((selection, index) => {
+    const basket = {
+      id: `basket-${Date.now()}-${index}`,
+      name: `Basket ${nextBasketNumber()}`,
+      customName: false,
+      enabled: true,
+      accentColor: nextBasketAccentColor(),
+      items: [selection.call, selection.put].map((leg) => ({
+        expiry: selection.expiry,
+        strike: Number(leg.strike),
+        optionType: leg.type,
+        lots: Number(leg.lots),
+      })),
+    };
+    state.baskets.push(basket);
+    return basket;
   });
   saveState();
-  renderBaskets();
+  const basketIds = newBaskets.map((basket) => basket.id);
+  renderBaskets({ onlyBasketIds: basketIds });
+  scheduleRefresh({ renderBasketCards: basketIds });
   $("strangle-dialog").close();
   window.simpleStrangleResult = null;
 }
@@ -1458,7 +1677,10 @@ function renderBasketContentsDialog() {
   $("basket-contents-title").textContent = `${basketDisplayName(basket)} · contents`;
   const nameInput = $("basket-contents-name");
   if (document.activeElement !== nameInput) nameInput.value = basketDisplayName(basket);
-  const host = $("basket-contents-list");
+  const host = $("basket-contents-list"),
+    focusedKey = host.contains(document.activeElement)
+      ? document.activeElement.dataset.contentsFocusKey
+      : null;
   host.replaceChildren();
   if (!basket.items.length) {
     const empty = document.createElement("p");
@@ -1475,6 +1697,7 @@ function renderBasketContentsDialog() {
     details.className = "basket-contents-details";
     const type = document.createElement("select");
     type.className = "contents-type-select";
+    type.dataset.contentsFocusKey = `position-${index}-type`;
     type.setAttribute("aria-label", `Option type for ${positionName(position)}`);
     type.innerHTML = '<option value="CE">Call · CE</option><option value="PE">Put · PE</option>';
     type.value = position.optionType;
@@ -1493,6 +1716,7 @@ function renderBasketContentsDialog() {
     strikeInput.step = "50";
     strikeInput.value = position.strike;
     strikeInput.className = "contents-value-input contents-strike-input";
+    strikeInput.dataset.contentsFocusKey = `position-${index}-strike`;
     strikeInput.setAttribute("aria-label", `Strike for ${positionName(position)}`);
     const strikeReadout = document.createElement("span");
     strikeReadout.className = "contents-strike-readout mobile-only-control";
@@ -1523,6 +1747,7 @@ function renderBasketContentsDialog() {
       button.type = "button";
       button.className = "contents-step mobile-only-control";
       button.textContent = label;
+      button.dataset.contentsFocusKey = `position-${index}-strike-${delta < 0 ? "down" : "up"}`;
       button.setAttribute("aria-label", `${delta < 0 ? "Lower" : "Raise"} strike for ${positionName(position)}`);
       button.addEventListener("click", () => changeStrike(delta));
       strike.append(button);
@@ -1538,6 +1763,10 @@ function renderBasketContentsDialog() {
     price.textContent = positionResult
       ? `${money(positionResult.buy)} → ${money(positionResult.close)}`
       : "Price unavailable";
+    if (positionResult?.close > positionResult?.buy)
+      price.classList.add("is-profit");
+    else if (positionResult?.close < positionResult?.buy)
+      price.classList.add("is-loss");
     details.append(price);
     const lots = document.createElement("div");
     lots.className = "basket-contents-lots";
@@ -1550,6 +1779,7 @@ function renderBasketContentsDialog() {
     lotsInput.step = "1";
     lotsInput.value = position.lots;
     lotsInput.className = "contents-value-input contents-lots-input";
+    lotsInput.dataset.contentsFocusKey = `position-${index}-lots`;
     lotsInput.setAttribute("aria-label", `Lots for ${positionName(position)}`);
     lotsInput.addEventListener("change", () => {
       const next = Number(lotsInput.value);
@@ -1575,16 +1805,28 @@ function renderBasketContentsDialog() {
       button.type = "button";
       button.className = "contents-step mobile-only-control";
       button.textContent = label;
+      button.dataset.contentsFocusKey = `position-${index}-lots-${delta < 0 ? "down" : "up"}`;
       button.setAttribute("aria-label", `${delta < 0 ? "Remove one lot from" : "Add one lot to"} ${positionName(position)}`);
       button.disabled = delta < 0 && position.lots <= 1;
       button.addEventListener("click", () => changeLots(delta));
       lots.append(button);
     }
     lots.insertBefore(count, lots.children[1] || null);
-    lots.append(lotsInput);
+    const lotsField = document.createElement("label");
+    lotsField.className = "contents-lots-edit";
+    const lotsUnit = document.createElement("span");
+    lotsUnit.textContent = "lots";
+    lotsField.append(lotsInput, lotsUnit);
+    lots.append(lotsField);
     row.append(details, lots);
     host.append(row);
   });
+  if (focusedKey) {
+    const nextFocus = [...host.querySelectorAll("[data-contents-focus-key]")].find(
+      (element) => element.dataset.contentsFocusKey === focusedKey,
+    );
+    nextFocus?.focus({ preventScroll: true });
+  }
 }
 function updateOptionDialogHeading() {
   if (window.editPositionIndex === null || window.editPositionIndex === undefined) return;
@@ -2738,7 +2980,10 @@ function combineBasket(results) {
     return { t, pnl: values.reduce((a, b) => a + b, 0) };
   });
 }
-async function loadTrade(generation = ++requestGeneration) {
+async function loadTrade(
+  generation = ++requestGeneration,
+  renderBasketCards = true,
+) {
   const day = dateField.value,
     statBaskets = state.baskets.filter(
       (b) => b.enabled !== false && b.items.some((p) => p.enabled !== false),
@@ -2749,11 +2994,16 @@ async function loadTrade(generation = ++requestGeneration) {
     window.chartData = null;
     window.miniChartData = null;
     window.basketPnlResults = {};
-    renderBaskets();
+    renderRefreshedBaskets(renderBasketCards);
     return;
   }
   if (!statBaskets.length) {
-    await loadNiftyOnly(day, $("interval").value, generation);
+    await loadNiftyOnly(
+      day,
+      $("interval").value,
+      generation,
+      renderBasketCards,
+    );
     return;
   }
   $("pnl-plot").hidden = false;
@@ -2769,11 +3019,12 @@ async function loadTrade(generation = ++requestGeneration) {
   }
   $("error").hidden = true;
   $("output").hidden = !chartBaskets.length;
-  if (chartBaskets.length) $("output").classList.add("loading");
+  if (chartBaskets.length && renderBasketCards)
+    $("output").classList.add("loading");
   $("empty").hidden = true;
   setChartTooltipVisible($("chart-tooltip"), false);
   const ctx = chartCanvas.getContext("2d");
-  ctx.clearRect(0, 0, chartCanvas.width, chartCanvas.height);
+  if (renderBasketCards) ctx.clearRect(0, 0, chartCanvas.width, chartCanvas.height);
   try {
     const interval = $("interval").value,
       indexPromise = loadNiftyIndex(day, interval)
@@ -2884,7 +3135,7 @@ async function loadTrade(generation = ++requestGeneration) {
         },
       ]),
     );
-    renderBaskets();
+    renderRefreshedBaskets(renderBasketCards);
     if (!data.length) {
       $("pnl-plot").hidden = true;
       $("percent-plot").hidden = true;
@@ -2959,7 +3210,12 @@ async function loadTrade(generation = ++requestGeneration) {
     }
   }
 }
-async function loadNiftyOnly(day, interval, generation) {
+async function loadNiftyOnly(
+  day,
+  interval,
+  generation,
+  renderBasketCards = true,
+) {
   $("pnl-plot").hidden = true;
   $("percent-plot").hidden = true;
   $("error").hidden = true;
@@ -2978,7 +3234,7 @@ async function loadNiftyOnly(day, interval, generation) {
   window.chartData = null;
   window.miniChartData = null;
   window.basketPnlResults = {};
-  renderBaskets();
+  renderRefreshedBaskets(renderBasketCards);
   try {
     const index = await loadNiftyIndex(day, interval).then(
       (points) => ({ points }),
