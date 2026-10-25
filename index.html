@@ -1498,6 +1498,13 @@
       .date-display {
         padding: 0 13px;
       }
+      .date-display > #date-open{flex:1;min-width:0;width:auto;padding:0 8px}
+      .date-display > .trading-day-step{display:grid;width:30px;height:30px;flex:0 0 30px;place-items:center;border:1px solid #30353a;border-radius:8px;background:#101216;color:#aeb4bb;cursor:pointer}
+      #trading-day-prev,#trading-day-next{display:flex;align-items:center;justify-content:center;padding:0;text-align:center}
+      .date-display > .trading-day-step svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+      .date-display > #date-open svg{width:15px;height:15px;flex:0 0 15px;fill:none;stroke:var(--site-accent);stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+      .date-display > .trading-day-step:hover:not(:disabled){border-color:var(--site-accent);background:color-mix(in srgb,var(--site-accent) 10%,#101216);color:var(--site-accent)}
+      .date-display > .trading-day-step:disabled{opacity:.35;cursor:not-allowed}
       .date-display > span:last-of-type {
         color: #8f979f;
       }
@@ -3143,6 +3150,10 @@
       .smart-alternative-copy .smart-loss{color:var(--red)}
       .basket-control-actions{display:flex;align-items:center;gap:10px}
       .basket-control-actions .button{white-space:nowrap}
+      .bulk-strangle-picker{display:grid;gap:9px;margin:12px 0}
+      .bulk-strangle-picker[hidden]{display:none!important}
+      #clear-baskets{border-color:color-mix(in srgb,var(--red) 34%,#30343a);color:color-mix(in srgb,var(--red) 82%,#fff)}
+      #clear-baskets:hover{border-color:var(--red);background:color-mix(in srgb,var(--red) 9%,#111316)}
       .controls{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) auto}
       #new-strangle{background:color-mix(in srgb,var(--site-accent) 8%,#101113);border-color:color-mix(in srgb,var(--site-accent) 30%,#292c30);color:#e8e9eb}
       #new-strangle:hover{border-color:var(--site-accent);color:var(--site-accent)}
@@ -3171,29 +3182,16 @@
       .strangle-total strong{color:var(--green)}
       .strangle-total strong.over{color:var(--red)}
       #strangle-form .strangle-actions{display:flex;justify-content:flex-end;gap:9px;margin:0}
-      .strangle-bulk-toggle{display:flex;align-items:center;gap:9px;width:max-content;color:#c6cbd0;font-size:13px;font-weight:650;cursor:pointer}
-      .strangle-bulk-toggle input,.strangle-offset-options input{width:16px;height:16px;margin:0;accent-color:var(--site-accent)}
-      #simple-strangle-bulk-offsets{margin:0;padding:12px;border:1px solid #30353a;border-radius:11px}
-      #simple-strangle-bulk-offsets[hidden]{display:none!important}
-      #simple-strangle-bulk-offsets legend{padding:0 6px;color:#92999f;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
-      .strangle-offset-options{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;max-height:210px;overflow:auto;overscroll-behavior:contain}
+      .strangle-offset-options input{width:16px;height:16px;margin:0;accent-color:var(--site-accent)}
+      .strangle-offset-options{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
       .strangle-offset-options label{display:flex;align-items:center;justify-content:center;gap:6px;min-height:38px;border:1px solid #292e34;border-radius:9px;background:#0c0e11;color:#c9cdd2;font-size:12px;font-variant-numeric:tabular-nums;cursor:pointer}
       .strangle-offset-options label:has(input:checked){border-color:color-mix(in srgb,var(--site-accent) 60%,#292e34);background:color-mix(in srgb,var(--site-accent) 12%,#0c0e11);color:var(--site-accent)}
+      #basket-offset-picker{margin:0;padding:12px;border:1px solid #30353a;border-radius:11px}
+      #basket-offset-picker[hidden]{display:none!important}
+      #basket-offset-picker legend{padding:0 6px;color:#92999f;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
       #simple-strangle-result{position:relative;display:grid;gap:10px;padding:14px;border:1px solid color-mix(in srgb,var(--site-accent) 35%,#25282c);border-radius:12px;background:linear-gradient(135deg,color-mix(in srgb,var(--site-accent) 8%,#0a0b0c),#08090a 65%)}
       #simple-strangle-result[hidden]{display:none!important}
       #simple-strangle-result.is-updating,#simple-strangle-result.has-error{opacity:1!important;pointer-events:none}
-      .simple-strangle-bulk-result{position:relative;display:grid;gap:10px;min-height:105px;padding:10px;border:1px solid color-mix(in srgb,var(--site-accent) 35%,#25282c);border-radius:12px;background:linear-gradient(135deg,color-mix(in srgb,var(--site-accent) 8%,#0a0b0c),#08090a 65%)}
-      .simple-strangle-bulk-result[hidden]{display:none!important}
-      .simple-strangle-bulk-result.is-updating,.simple-strangle-bulk-result.has-error{opacity:1!important;pointer-events:none}
-      .simple-strangle-bulk-result.is-updating .simple-preview-loading{display:flex}
-      #simple-strangle-bulk-list{display:grid;align-content:start;gap:6px;max-height:220px;overflow:auto;overscroll-behavior:contain}
-      .simple-strangle-bulk-row{display:grid;gap:4px;min-width:0;align-self:start;padding:8px 10px;border:1px solid #282c30;border-radius:9px;background:#090a0c;font-size:12px;font-variant-numeric:tabular-nums}
-      .simple-strangle-bulk-head,.simple-strangle-bulk-costs{display:grid;grid-template-columns:minmax(0,1fr) max-content minmax(0,1fr);align-items:center;gap:8px;min-width:0;white-space:nowrap}
-      .simple-strangle-bulk-head>strong{grid-column:1;justify-self:start;color:var(--site-accent);font-variant-numeric:tabular-nums}
-      .simple-strangle-bulk-head>span,.simple-strangle-bulk-breakdown{grid-column:2;justify-self:center;color:#adb4ba;text-align:center;white-space:nowrap}
-      .simple-strangle-bulk-head::after{grid-column:3;content:""}
-      .simple-strangle-bulk-costs>b{grid-column:3;justify-self:end;color:#f0f2f4;font-variant-numeric:tabular-nums;white-space:nowrap}
-      .simple-strangle-bulk-result.has-error::after{position:absolute;inset:0;z-index:2;display:grid;place-items:center;padding:16px;border-radius:inherit;background:#08090ae8;color:var(--red);font-size:13px;font-weight:700;text-align:center;content:attr(data-status)}
       .simple-preview-loading{position:absolute;inset:0;z-index:2;display:none;align-items:center;justify-content:center;gap:10px;border-radius:inherit;background:color-mix(in srgb,#08090c 88%,transparent);backdrop-filter:blur(3px);color:#e7e9ec}
       #simple-strangle-result.is-updating .simple-preview-loading{display:flex}
       .simple-preview-spinner{width:19px;height:19px;flex:0 0 auto;border:2px solid color-mix(in srgb,var(--site-accent) 28%,#34383d);border-top-color:var(--site-accent);border-radius:50%;animation:simple-preview-spin .75s linear infinite}
@@ -3210,7 +3208,7 @@
       #simple-strangle-total{display:flex;justify-content:space-between;gap:12px;padding-top:10px;border-top:1px solid #282c30;font-size:12px}
       #simple-strangle-total strong{font-variant-numeric:tabular-nums}
       @media(max-width:760px){.controls{grid-template-columns:repeat(2,minmax(0,1fr))}.basket-control-actions{grid-column:1/-1;justify-self:stretch}.basket-control-actions .button{width:auto;flex:1}}
-      @media(max-width:520px){.basket-control-actions{display:grid;grid-template-columns:1fr 1fr;grid-column:1/-1}.basket-control-actions .button{width:100%;padding-inline:8px;font-size:12px}#strangle-form{padding:18px}.strangle-inputs,.strangle-legs{grid-template-columns:1fr}.strangle-offset-options{grid-template-columns:repeat(4,minmax(0,1fr))}.simple-strangle-bulk-row{gap:4px;padding:7px 8px;font-size:11px}.simple-strangle-bulk-head,.simple-strangle-bulk-costs{gap:5px}}
+      @media(max-width:520px){.basket-control-actions{display:grid;grid-template-columns:1fr 1fr;grid-column:1/-1}.basket-control-actions .button{width:100%;padding-inline:8px;font-size:12px}#strangle-form{padding:18px}.strangle-inputs,.strangle-legs{grid-template-columns:1fr}.strangle-offset-options{grid-template-columns:repeat(4,minmax(0,1fr))}}
       #option-submit{min-width:116px}
       @media(max-width:520px){.option-entry-fields{grid-template-columns:minmax(0,1fr)}.smart-input-grid{grid-template-columns:1fr}.smart-result,#option-dialog form .smart-result{grid-template-columns:minmax(0,1fr)!important;gap:14px}.smart-result .button{width:100%!important;min-width:0}}
     </style>
@@ -3577,7 +3575,7 @@
       #option-dialog form .manual-option-preview,#option-dialog form .smart-result{transition:opacity .14s ease}
       #option-dialog form .manual-option-preview.is-updating,#option-dialog form .smart-result.is-updating,#strangle-dialog .strangle-result.is-updating,#strangle-dialog #simple-strangle-result.is-updating{opacity:.6;pointer-events:none}
       @media (pointer: coarse){#chart,#nifty-chart,#percent-chart,.scenario-chart{touch-action:none;user-select:none;-webkit-user-select:none}}
-      @media(max-width:760px){#option-dialog form .smart-result{min-height:245px}#strangle-dialog .strangle-result{min-height:205px}#strangle-dialog #simple-strangle-result{min-height:290px}#strangle-dialog .simple-strangle-bulk-result{min-height:105px}}
+      @media(max-width:760px){#option-dialog form .smart-result{min-height:245px}#strangle-dialog .strangle-result{min-height:205px}#strangle-dialog #simple-strangle-result{min-height:290px}}
       @media(max-width:620px){
         .session{display:flex;align-self:flex-end;align-items:center;justify-content:flex-end;gap:7px;width:max-content;max-width:100%;padding:7px 9px}
         .session .provider-status{width:max-content;max-width:100%;min-height:36px;padding:0 12px}
@@ -3588,6 +3586,7 @@
         .expiry-field,.basket-control-actions{grid-column:1/-1}
         .basket-control-actions{display:grid;grid-auto-flow:column;grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-column:1/-1;gap:8px;width:100%}
         .basket-control-actions .button{width:100%;min-width:0;min-height:44px;padding-inline:8px;white-space:normal}
+        .basket-control-actions #clear-baskets{grid-column:1/-1}
         .hero p{font-size:17px}
         .session .provider-status,.session .theme-picker{font-size:15px}
         .ticker h2{font-size:17px}
@@ -3783,13 +3782,15 @@
         <div class="field date-field">
             <label for="date-open">Trading day</label>
             <div class="date-display">
+              <button id="trading-day-prev" class="trading-day-step" type="button" aria-label="Previous trading day"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10"/></svg></button>
               <button
                 id="date-open"
                 type="button"
                 aria-label="Choose trading day"
               >
                 <span id="date-label"></span
-                ><span aria-hidden="true">▣</span></button
+                ><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="10" rx="2"/><path d="M5.5 2v3M10.5 2v3M2.5 6.5h11"/></svg></button
+              ><button id="trading-day-next" class="trading-day-step" type="button" aria-label="Next trading day"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg></button
               ><input
                 id="date"
                 type="date"
@@ -3841,8 +3842,20 @@
           <button id="new-strangle" class="button secondary" type="button">
             ＋ Add Strangle
           </button>
+          <button id="bulk-add-strangles" class="button secondary" type="button" aria-expanded="false">
+            Bulk Add Strangles
+          </button>
+          <button id="clear-baskets" class="button secondary" type="button" hidden>
+            Clear all baskets
+          </button>
         </div>
       </section>
+      <div class="bulk-strangle-picker" id="bulk-strangle-picker" hidden>
+        <fieldset id="basket-offset-picker">
+          <legend>Strangle baskets · toggle offsets</legend>
+          <div class="strangle-offset-options" id="basket-offset-options"></div>
+        </fieldset>
+      </div>
       <section
         id="baskets"
         class="baskets"
@@ -4028,11 +4041,6 @@
                 <div class="picker-stepper"><button class="picker-step-button" type="button" data-step-target="simple-strangle-lots" data-step-direction="-1" aria-label="Decrease lots per leg">−</button><input id="simple-strangle-lots" type="number" min="1" max="10000" step="1" value="1" /><button class="picker-step-button" type="button" data-step-target="simple-strangle-lots" data-step-direction="1" aria-label="Increase lots per leg">+</button></div>
               </div>
             </div>
-            <label class="strangle-bulk-toggle"><input id="simple-strangle-bulk" type="checkbox" /> <span>Bulk add multiple offsets</span></label>
-            <fieldset id="simple-strangle-bulk-offsets" hidden>
-              <legend>Choose offsets · same center and lots</legend>
-              <div class="strangle-offset-options" id="simple-strangle-offset-options"></div>
-            </fieldset>
             <section id="simple-strangle-result" hidden>
               <div id="simple-strangle-summary">
                 <div class="simple-strangle-leg"><span>Call</span><strong id="simple-call-title"></strong><small id="simple-call-detail"></small></div>
@@ -4040,10 +4048,6 @@
               </div>
               <div id="simple-strangle-total"><span>Estimated debit · previous closes</span><strong id="simple-total-value"></strong></div>
               <div class="simple-preview-loading" role="status" aria-live="polite"><span class="simple-preview-spinner" aria-hidden="true"></span><span><strong>Refreshing preview</strong><small>Checking strikes and previous closes</small></span></div>
-            </section>
-            <section id="simple-strangle-bulk-result" class="simple-strangle-bulk-result" hidden>
-              <div id="simple-strangle-bulk-list"></div>
-              <div class="simple-preview-loading" role="status" aria-live="polite"><span class="simple-preview-spinner" aria-hidden="true"></span><span><strong>Finding selected strangles</strong><small>Checking strikes and previous closes</small></span></div>
             </section>
           </div>
           <div id="strangle-error" class="error" hidden></div>
