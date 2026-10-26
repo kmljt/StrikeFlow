@@ -185,6 +185,8 @@ let optionContractsRequest = 0;
 let manualOptionPreviewRequest = 0;
 let manualOptionPreviewDebounce = null;
 let dateBasketRequest = 0;
+let bulkCenterDebounce = null;
+let bulkCenterRequest = 0;
 window.smartStrangleResult = null;
 const basketOffsetOptions = $("basket-offset-options");
 for (let offset = -200; offset <= 1000; offset += 50) {
@@ -203,7 +205,19 @@ $("bulk-add-strangles").addEventListener("click", () => {
     open = picker.hidden;
   picker.hidden = !open;
   $("bulk-add-strangles").setAttribute("aria-expanded", String(open));
+  if (open) syncBulkCenterInput();
 });
+$("bulk-strangle-center").addEventListener("input", scheduleBulkCenterUpdate);
+$("bulk-strangle-center").addEventListener("change", () => {
+  const value = $("bulk-strangle-center").value.trim();
+  if (value === "" || !Number.isFinite(Number(value))) {
+    cancelBulkCenterUpdate();
+    syncBulkCenterInput();
+  }
+});
+$("bulk-center-decrease").addEventListener("click", () => stepBulkCenter(-1));
+$("bulk-center-increase").addEventListener("click", () => stepBulkCenter(1));
+$("bulk-center-reset").addEventListener("click", resetBulkCenter);
 $("clear-baskets").addEventListener("click", clearAllBaskets);
 $("strangle-cancel").addEventListener("click", () => $("strangle-dialog").close());
 $("strangle-add").addEventListener("click", () => {
@@ -244,9 +258,9 @@ $("basket-contents-name").addEventListener("change", () => {
   basket.name = name;
   basket.customName = true;
   saveState();
-  renderBaskets();
+  renderBaskets({ onlyBasketId: basket.id });
   renderBasketContentsDialog();
-  scheduleRefresh();
+  scheduleRefresh({ renderBasketCards: false });
 });
 $("option-cancel").addEventListener("click", () => $("option-dialog").close());
 $("option-dialog-form").addEventListener("submit", (e) => {
@@ -323,7 +337,9 @@ $("strike-input").addEventListener("change", () => {
 $("expiry").addEventListener("change", scheduleManualOptionPreview);
 $("expiry").addEventListener("change", loadOptionContracts);
 dateField.addEventListener("change", () => {
+  const previousBasketHeight = $("baskets").getBoundingClientRect().height;
   syncTradingDayButtons();
+  cancelBulkCenterUpdate();
   const requestId = ++dateBasketRequest;
   clearTimeout(refreshTimer);
   ++requestGeneration;
@@ -342,7 +358,7 @@ dateField.addEventListener("change", () => {
   window.basketPnlResults = {};
   window.chartData = null;
   window.miniChartData = null;
-  renderBaskets();
+  showBasketTransition("Building default strangles…", previousBasketHeight);
   if (!$("output").hidden) {
     $("output").classList.add("loading");
     $("output").setAttribute("aria-busy", "true");
@@ -356,11 +372,15 @@ dateField.addEventListener("change", () => {
     lots: 1,
   };
   saveState();
+  syncBulkCenterInput();
   if ($("expiry").value) {
     loadOptionContracts();
     addDefaultDateBaskets(dateField.value, $("expiry").value, requestId);
   }
   else {
+    clearBasketTransition();
+    $("baskets").replaceChildren();
+    $("clear-baskets").hidden = true;
     $("option-type-select").disabled = true;
     $("strike-input").disabled = true;
     syncStepButtons("strike-input");
@@ -423,17 +443,52 @@ async function addDefaultDateBaskets(day, expiry, requestId) {
     };
     state.bulkAdderUsed = true;
     saveState();
+    syncBulkCenterInput();
     window.basketPnlResults = {};
     syncBulkOffsetPickerFromBaskets();
     renderBaskets();
     scheduleRefresh();
   } catch (error) {
     if (requestId === dateBasketRequest && dateField.value === day) {
+      clearBasketTransition();
+      $("baskets").replaceChildren();
       showError(error.message || "Could not add the default strangles for this date.");
       scheduleRefresh();
     }
   }
 }
+function resetBasketsForExpiry() {
+  const day = dateField.value,
+    expiry = $("expiry").value,
+    previousBasketHeight = $("baskets").getBoundingClientRect().height;
+  if (!expiry || expiry < day) return;
+  cancelBulkCenterUpdate();
+  const requestId = ++dateBasketRequest;
+  clearTimeout(refreshTimer);
+  ++requestGeneration;
+  state.baskets = [];
+  state.bulkAdderUsed = true;
+  state.bulkContext = { day, expiry, center: null, lots: 1 };
+  saveState();
+  syncBulkCenterInput();
+  syncBulkOffsetPickerFromBaskets();
+  document.querySelectorAll('input[name="basket-offset-toggle"]').forEach((input) => {
+    input.checked = [0, 100, 200, 300, 400, 500].includes(Number(input.value));
+  });
+  saveState();
+  window.activeScenarioBasketId = null;
+  window.basketPnlResults = {};
+  window.chartData = null;
+  window.miniChartData = null;
+  showBasketTransition("Building default strangles…", previousBasketHeight);
+  if (!$("output").hidden) {
+    $("output").classList.add("loading");
+    $("output").setAttribute("aria-busy", "true");
+    $("dates").textContent = `Updating expiry · ${formatDate(day)}`;
+  }
+  addDefaultDateBaskets(day, expiry, requestId);
+}
+$("expiry").addEventListener("change", resetBasketsForExpiry);
 let calendarMonth = new Date(`${dateField.value.slice(0, 7)}-01T00:00:00Z`);
 function syncTradingDayButtons() {
   let nextDay = addDays(dateField.value, 1);
@@ -649,6 +704,10 @@ function renderCalendar() {
 }
 function scheduleRefresh({ renderBasketCards = true } = {}) {
   clearTimeout(refreshTimer);
+  if (!$("output").hidden) {
+    $("output").classList.add("loading");
+    $("output").setAttribute("aria-busy", "true");
+  }
   const generation = ++requestGeneration;
   refreshTimer = setTimeout(
     () => loadTrade(generation, renderBasketCards),
@@ -705,11 +764,14 @@ function renderBaskets(options = {}) {
   const onlyBasketIds = options.onlyBasketIds ||
       (options.onlyBasketId ? [options.onlyBasketId] : null),
     incremental = Boolean(onlyBasketIds?.length),
+    orderedBaskets = sortBasketInfo(state.baskets),
+    basketOrder = new Map(orderedBaskets.map((basket, index) => [basket.id, index])),
     oldCards = [...host.querySelectorAll(".basket[data-basket-id]")],
     activeElement = document.activeElement,
     focusedLabel = host.contains(activeElement)
       ? document.activeElement.getAttribute("aria-label")
       : null,
+    focusedBasketId = activeElement.closest?.(".basket")?.dataset.basketId,
     focusedBasketIndex = activeElement.closest?.(".basket")
       ? oldCards.indexOf(activeElement.closest(".basket"))
       : -1,
@@ -731,10 +793,11 @@ function renderBaskets(options = {}) {
       ref.canvas.isConnected,
     );
   } else {
+    clearBasketTransition();
     host.replaceChildren();
     window.scenarioChartRefs = [];
   }
-  sortBasketInfo(state.baskets)
+  orderedBaskets
     .filter((basket) => !incremental || onlyBasketIds.includes(basket.id))
     .forEach((b) => {
     const index = state.baskets.indexOf(b);
@@ -742,9 +805,11 @@ function renderBaskets(options = {}) {
       valid = result?.day === dateField.value,
       displayName = basketDisplayName(b);
     const toggleScenario = () => {
-      window.activeScenarioBasketId =
-        window.activeScenarioBasketId === b.id ? null : b.id;
-      renderBaskets();
+      const previousId = window.activeScenarioBasketId;
+      window.activeScenarioBasketId = previousId === b.id ? null : b.id;
+      renderBaskets({
+        onlyBasketIds: [b.id, previousId].filter(Boolean),
+      });
     };
     const card = document.createElement("section");
     card.className = "card basket";
@@ -779,7 +844,7 @@ function renderBaskets(options = {}) {
     basketToggle.addEventListener("change", () => {
       b.enabled = basketToggle.checked;
       saveState();
-      scheduleRefresh();
+      scheduleRefresh({ renderBasketCards: b.id });
     });
     const title = document.createElement("h2");
     title.textContent = displayName;
@@ -924,13 +989,35 @@ function renderBaskets(options = {}) {
       if (window.activeScenarioBasketId === b.id)
         window.activeScenarioBasketId = null;
       const cardsBefore = [...host.querySelectorAll(".basket[data-basket-id]")],
-        removedIndex = cardsBefore.indexOf(card);
+        removedIndex = cardsBefore.indexOf(card),
+        scrollAnchor = cardsBefore
+          .filter((candidate) => candidate !== card)
+          .map((candidate) => ({
+            id: candidate.dataset.basketId,
+            top: candidate.getBoundingClientRect().top,
+            bottom: candidate.getBoundingClientRect().bottom,
+          }))
+          .find((anchor) => anchor.bottom > 0 && anchor.top < window.innerHeight);
       card.remove();
       window.scenarioChartRefs = window.scenarioChartRefs.filter((ref) =>
         ref.canvas.isConnected,
       );
       const cards = [...host.querySelectorAll(".basket[data-basket-id]")],
         nextCard = cards[Math.min(Math.max(0, removedIndex), cards.length - 1)];
+      if (scrollAnchor) {
+        const anchorElement = cards.find(
+          (candidate) => candidate.dataset.basketId === scrollAnchor.id,
+        );
+        if (anchorElement) {
+          const delta = anchorElement.getBoundingClientRect().top - scrollAnchor.top;
+          if (Math.abs(delta) > 1)
+            window.scrollTo({
+              left: window.scrollX,
+              top: window.scrollY + delta,
+              behavior: "instant",
+            });
+        }
+      }
       nextCard?.querySelector(".remove-basket-button")?.focus({
         preventScroll: true,
       });
@@ -1037,7 +1124,7 @@ function renderBaskets(options = {}) {
       optionToggle.addEventListener("change", () => {
         position.enabled = optionToggle.checked;
         saveState();
-        scheduleRefresh();
+        scheduleRefresh({ renderBasketCards: b.id });
       });
       const info = document.createElement("div");
       info.className = "instrument-info";
@@ -1060,7 +1147,7 @@ function renderBaskets(options = {}) {
         position.lots = nextLots;
         updateLotControl();
         saveState();
-        scheduleRefresh();
+        scheduleRefresh({ renderBasketCards: b.id });
       };
       const decrement = document.createElement("button");
       decrement.type = "button";
@@ -1079,22 +1166,22 @@ function renderBaskets(options = {}) {
       info.append(titleLine);
       updateLotControl();
       const instrumentResult = valid
-        ? result.positions.find((x) => x.index === i)
-        : null;
-      let positionTotals = null;
+          ? result.positions.find((x) => x.index === i)
+          : null,
+        detail = document.createElement("small"),
+        prices = document.createElement("span"),
+        change = document.createElement("strong"),
+        positionTotals = document.createElement("div");
+      detail.className = "instrument-detail";
+      detail.style.cssText =
+        "display:flex;gap:8px;align-items:center;flex-wrap:wrap";
       if (instrumentResult) {
-        const detail = document.createElement("small");
-        detail.className = "instrument-detail";
-        detail.style.cssText =
-          "display:flex;gap:8px;align-items:center;flex-wrap:wrap";
-        const prices = document.createElement("span");
         prices.textContent = `${money(instrumentResult.buy)} → ${money(instrumentResult.close)}`;
         prices.setAttribute(
           "aria-label",
           `Previous close ${money(instrumentResult.buy)}; today close ${money(instrumentResult.close)}`,
         );
         prices.title = `Previous close ${money(instrumentResult.buy)} · Today close ${money(instrumentResult.close)}`;
-        const change = document.createElement("strong");
         change.textContent = percentChange(
           instrumentResult.buy,
           instrumentResult.close,
@@ -1105,36 +1192,47 @@ function renderBaskets(options = {}) {
             : instrumentResult.ending < 0
               ? "red"
               : "";
-        positionTotals = document.createElement("div");
-        positionTotals.className = "position-totals";
-        for (const [name, value, color] of [
-          [
-            "Cost",
-            money(instrumentResult.buy * instrumentResult.multiplier),
-            "",
-          ],
-          [
-            "Value",
-            money(instrumentResult.close * instrumentResult.multiplier),
-            "",
-          ],
-          ["P&L", signed(instrumentResult.ending), change.className],
-        ]) {
-          const metric = document.createElement("div");
-          metric.className = "position-total";
-          const caption = document.createElement("span");
-          caption.textContent = name;
-          const amount = document.createElement("strong");
-          amount.textContent = value;
-          if (color) amount.className = color;
-          metric.append(caption, amount);
-          positionTotals.append(metric);
-        }
-        detail.append(prices, change);
-        info.append(detail);
+      } else {
+        prices.textContent = "— → —";
+        prices.setAttribute("aria-label", "Prices updating");
+        change.textContent = "—";
+      }
+      detail.append(prices, change);
+      info.append(detail);
+      positionTotals.className = "position-totals";
+      for (const [name, value, color] of [
+        [
+          "Cost",
+          instrumentResult
+            ? money(instrumentResult.buy * instrumentResult.multiplier)
+            : "—",
+          "",
+        ],
+        [
+          "Value",
+          instrumentResult
+            ? money(instrumentResult.close * instrumentResult.multiplier)
+            : "—",
+          "",
+        ],
+        [
+          "P&L",
+          instrumentResult ? signed(instrumentResult.ending) : "—",
+          change.className,
+        ],
+      ]) {
+        const metric = document.createElement("div");
+        metric.className = "position-total";
+        const caption = document.createElement("span");
+        caption.textContent = name;
+        const amount = document.createElement("strong");
+        amount.textContent = value;
+        if (color) amount.className = color;
+        metric.append(caption, amount);
+        positionTotals.append(metric);
       }
       row.append(optionToggle, info);
-      if (positionTotals) row.append(positionTotals);
+      row.append(positionTotals);
       list.append(row);
     });
     const scenarioPanel = document.createElement("section");
@@ -1308,7 +1406,11 @@ function renderBaskets(options = {}) {
     card.append(head);
     if (structure.childElementCount) card.append(structure);
     card.append(metrics, performance, list, scenarioPanel);
-    host.append(card);
+    const order = basketOrder.get(b.id),
+      followingCard = [...host.querySelectorAll(".basket[data-basket-id]")].find(
+        (existing) => basketOrder.get(existing.dataset.basketId) > order,
+      );
+    host.insertBefore(card, followingCard || null);
     const scenarioRef = window.scenarioChartRefs.at(-1);
     if (scenarioRef?.canvas.closest(".basket") === card)
       drawScenarioChart(
@@ -1321,7 +1423,12 @@ function renderBaskets(options = {}) {
       );
     });
   if (focusedLabel) {
-    const nextFocus = [...host.querySelectorAll("[aria-label]")].find(
+    const focusScope = focusedBasketId
+        ? [...host.querySelectorAll(".basket[data-basket-id]")].find(
+            (card) => card.dataset.basketId === focusedBasketId,
+          ) || host
+        : host,
+      nextFocus = [...focusScope.querySelectorAll("[aria-label]")].find(
       (element) => element.getAttribute("aria-label") === focusedLabel,
     );
     nextFocus?.focus({ preventScroll: true });
@@ -1352,6 +1459,23 @@ function renderBaskets(options = {}) {
   if ($("basket-contents-dialog").open) renderBasketContentsDialog();
   $("clear-baskets").hidden = state.baskets.length === 0;
 }
+function showBasketTransition(message, reservedHeight = 0) {
+  const host = $("baskets"),
+    status = document.createElement("div");
+  status.className = "basket-transition-status";
+  status.setAttribute("role", "status");
+  status.textContent = message;
+  host.style.minHeight = `${Math.max(96, reservedHeight)}px`;
+  host.setAttribute("aria-busy", "true");
+  host.replaceChildren(status);
+  window.scenarioChartRefs = [];
+  $("clear-baskets").hidden = true;
+}
+function clearBasketTransition() {
+  const host = $("baskets");
+  host.style.removeProperty("min-height");
+  host.removeAttribute("aria-busy");
+}
 function syncBulkOffsetPickerFromBaskets() {
   const basketOffsets = new Set(
       state.baskets
@@ -1361,6 +1485,175 @@ function syncBulkOffsetPickerFromBaskets() {
   document.querySelectorAll('input[name="basket-offset-toggle"]').forEach((input) => {
     input.checked = basketOffsets.has(Number(input.value));
   });
+}
+function currentBulkCenter() {
+  const context = state.bulkContext || {};
+  if (
+    context.day === dateField.value &&
+    context.center !== null &&
+    context.center !== "" &&
+    Number.isFinite(Number(context.center))
+  )
+    return Math.round(Number(context.center) / 50) * 50;
+  if (
+    window.niftyReferenceCloseDay === dateField.value &&
+    window.niftyReferenceClose !== null &&
+    window.niftyReferenceClose !== "" &&
+    Number.isFinite(Number(window.niftyReferenceClose))
+  )
+    return Math.round(Number(window.niftyReferenceClose) / 50) * 50;
+  return null;
+}
+function syncBulkCenterInput() {
+  const center = currentBulkCenter();
+  $("bulk-strangle-center").value = center === null ? "" : String(center);
+  syncBulkReferenceClose();
+}
+function syncBulkReferenceClose() {
+  const reference = window.niftyReferenceClose;
+  $("bulk-center-reference").textContent =
+    window.niftyReferenceCloseDay === dateField.value &&
+    reference !== null &&
+    reference !== "" &&
+    Number.isFinite(Number(reference))
+      ? `Prior close · ${formatSmartMoney(Number(reference))}`
+      : "Prior close unavailable";
+}
+function setBulkOffsetInputsDisabled(disabled) {
+  document.querySelectorAll('input[name="basket-offset-toggle"]').forEach((input) => {
+    input.disabled = disabled;
+  });
+}
+function cancelBulkCenterUpdate() {
+  clearTimeout(bulkCenterDebounce);
+  bulkCenterDebounce = null;
+  bulkCenterRequest++;
+  setBulkOffsetInputsDisabled(false);
+  $("bulk-center-status").textContent = "";
+}
+function stepBulkCenter(direction) {
+  const input = $("bulk-strangle-center"),
+    base = Number(input.value) || currentBulkCenter() || 50,
+    next = Math.max(50, Math.min(100000, base + direction * 50));
+  input.value = String(next);
+  input.focus({ preventScroll: true });
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+function resetBulkCenter() {
+  const reference = window.niftyReferenceClose;
+  if (
+    window.niftyReferenceCloseDay !== dateField.value ||
+    reference === null ||
+    reference === "" ||
+    !Number.isFinite(Number(reference))
+  ) {
+    $("bulk-center-status").textContent = "Prior close unavailable for this day.";
+    return;
+  }
+  const center = Math.round(Number(reference) / 50) * 50,
+    input = $("bulk-strangle-center");
+  input.value = String(center);
+  input.focus({ preventScroll: true });
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+function scheduleBulkCenterUpdate() {
+  clearTimeout(bulkCenterDebounce);
+  bulkCenterDebounce = null;
+  const requestId = ++bulkCenterRequest,
+    input = $("bulk-strangle-center"),
+    raw = input.value.trim() === "" ? NaN : Number(input.value);
+  setBulkOffsetInputsDisabled(true);
+  if (!Number.isFinite(raw) || raw < 50 || raw > 100000) {
+    $("bulk-center-status").textContent = "Enter a center from 50 to 100,000.";
+    setBulkOffsetInputsDisabled(false);
+    return;
+  }
+  const center = Math.max(50, Math.min(100000, Math.round(raw / 50) * 50));
+  bulkCenterDebounce = setTimeout(() => {
+    bulkCenterDebounce = null;
+    replaceBulkStranglesAtCenter(center, requestId);
+  }, 350);
+}
+async function replaceBulkStranglesAtCenter(center, requestId) {
+  const day = dateField.value,
+    context = state.bulkContext || {},
+    expiry = context.day === day ? context.expiry : $("expiry").value,
+    lots = context.day === day ? Number(context.lots) || 1 : 1,
+    offsets = [...document.querySelectorAll('input[name="basket-offset-toggle"]:checked')]
+      .map((input) => Number(input.value))
+      .sort((a, b) => a - b),
+    input = $("bulk-strangle-center"),
+    status = $("bulk-center-status");
+  input.value = String(center);
+  if (!offsets.length || currentBulkCenter() === center) {
+    state.bulkContext = { day, expiry, center, lots };
+    saveState();
+    status.textContent = "";
+    setBulkOffsetInputsDisabled(false);
+    return;
+  }
+  if (!expiry || expiry < day) {
+    status.textContent = "Choose an option expiry first.";
+    syncBulkCenterInput();
+    setBulkOffsetInputsDisabled(false);
+    return;
+  }
+  status.textContent = `Updating ${offsets.length} strangles…`;
+  try {
+    const picks = [];
+    for (let index = 0; index < offsets.length; index += 3) {
+      const batch = await Promise.all(
+        offsets.slice(index, index + 3).map((offset) =>
+          fetchSimpleStranglePick({ day, expiry, offset, lots, center }),
+        ),
+      );
+      picks.push(...batch);
+      if (requestId !== bulkCenterRequest) return;
+    }
+    // The selected baskets can retain an expiry that differs from the page's
+    // expiry selector. Date changes explicitly cancel this request, so only
+    // guard against a superseded request or a changed trading day here.
+    if (requestId !== bulkCenterRequest || dateField.value !== day) return;
+    if (picks.some((pick) => Number(pick.center) !== center))
+      throw Error("The selected NIFTY center was not applied.");
+    const oldBaskets = state.baskets.filter((basket) => offsets.includes(Number(basket.bulkOffset))),
+      oldIds = oldBaskets.map((basket) => basket.id),
+      oldIdSet = new Set(oldIds),
+      firstBasketNumber = nextBasketNumber(),
+      newBaskets = picks.map((pick, index) => ({
+        id: `bulk-${day}-${expiry}-${pick.offset}-${Date.now()}-${index}`,
+        name: `Basket ${firstBasketNumber + index}`,
+        customName: false,
+        enabled: true,
+        accentColor: basketAccentHex(state.baskets.length + index),
+        bulkOffset: Number(pick.offset),
+        items: [pick.call, pick.put].map((leg) => ({
+          expiry: pick.expiry,
+          strike: Number(leg.strike),
+          optionType: leg.type,
+          lots: Number(leg.lots),
+        })),
+      }));
+    oldIds.forEach((id) => delete window.basketPnlResults[id]);
+    if (oldIdSet.has(window.activeScenarioBasketId)) window.activeScenarioBasketId = null;
+    state.baskets = state.baskets.filter((basket) => !oldIdSet.has(basket.id));
+    state.baskets.push(...newBaskets);
+    state.bulkContext = { day, expiry, center, lots };
+    saveState();
+    syncBulkCenterInput();
+    syncBulkOffsetPickerFromBaskets();
+    const changedIds = [...oldIds, ...newBaskets.map((basket) => basket.id)],
+      newIds = newBaskets.map((basket) => basket.id);
+    renderBaskets({ onlyBasketIds: changedIds });
+    scheduleRefresh({ renderBasketCards: newIds });
+    status.textContent = "";
+  } catch (error) {
+    if (requestId !== bulkCenterRequest) return;
+    syncBulkCenterInput();
+    status.textContent = error.message || "Could not update the strangles.";
+  } finally {
+    if (requestId === bulkCenterRequest) setBulkOffsetInputsDisabled(false);
+  }
 }
 async function toggleBulkBasketOffset(input) {
   const offset = Number(input.value),
@@ -1427,6 +1720,7 @@ async function toggleBulkBasketOffset(input) {
       lots: request.lots,
     };
     saveState();
+    syncBulkCenterInput();
     syncBulkOffsetPickerFromBaskets();
     renderBaskets({ onlyBasketId: basket.id });
     scheduleRefresh({ renderBasketCards: basket.id });
@@ -1451,7 +1745,10 @@ function invalidateResults() {
   window.basketPnlResults = {};
   window.chartData = null;
   window.miniChartData = null;
-  $("output").hidden = true;
+  if (!$("output").hidden) {
+    $("output").classList.add("loading");
+    $("output").setAttribute("aria-busy", "true");
+  }
   renderBaskets();
   scheduleRefresh();
 }
@@ -1504,6 +1801,7 @@ function openSmartStrangle() {
   $("simple-strangle-center").value = Number.isFinite(cachedReference)
     ? String(Math.round(cachedReference / 50) * 50)
     : "";
+  syncStepButtons("simple-strangle-center");
   $("strangle-dialog").showModal();
   scheduleSimpleStrangle();
   $("simple-strangle-center").focus();
@@ -1812,6 +2110,7 @@ function addSimpleStrangle() {
     lots: Number(pick.call.lots),
   };
   saveState();
+  syncBulkCenterInput();
   syncBulkOffsetPickerFromBaskets();
   renderBaskets({ onlyBasketId: basket.id });
   scheduleRefresh({ renderBasketCards: basket.id });
@@ -1865,7 +2164,7 @@ function renderBasketContentsDialog() {
       position.optionType = type.value;
       window.basketPnlResults[basket.id] = null;
       saveState();
-      scheduleRefresh();
+      scheduleRefresh({ renderBasketCards: basket.id });
       renderBasketContentsDialog();
     });
     const strike = document.createElement("div");
@@ -1890,7 +2189,7 @@ function renderBasketContentsDialog() {
       position.strike = next;
       window.basketPnlResults[basket.id] = null;
       saveState();
-      scheduleRefresh();
+      scheduleRefresh({ renderBasketCards: basket.id });
       renderBasketContentsDialog();
     });
     const changeStrike = (delta) => {
@@ -1899,7 +2198,7 @@ function renderBasketContentsDialog() {
       position.strike = next;
       window.basketPnlResults[basket.id] = null;
       saveState();
-      scheduleRefresh();
+      scheduleRefresh({ renderBasketCards: basket.id });
       renderBasketContentsDialog();
     };
     for (const [label, delta] of [["−", -1], ["+", 1]]) {
@@ -1949,7 +2248,7 @@ function renderBasketContentsDialog() {
       }
       position.lots = next;
       saveState();
-      scheduleRefresh();
+      scheduleRefresh({ renderBasketCards: basket.id });
       renderBasketContentsDialog();
     });
     const changeLots = (delta) => {
@@ -1957,7 +2256,7 @@ function renderBasketContentsDialog() {
       if (!Number.isInteger(next) || next < 1) return;
       position.lots = next;
       saveState();
-      scheduleRefresh();
+      scheduleRefresh({ renderBasketCards: basket.id });
       renderBasketContentsDialog();
     };
     for (const [label, delta] of [["−", -1], ["+", 1]]) {
@@ -2000,11 +2299,11 @@ function finishBasketDialog() {
   const name = $("basket-name").value.trim(),
     b = state.baskets.find((x) => x.id === window.renameBasketId);
   if (!name || !b) return;
-  invalidateResults();
   b.name = name;
   b.customName = true;
   saveState();
-  renderBaskets();
+  renderBaskets({ onlyBasketId: b.id });
+  scheduleRefresh({ renderBasketCards: false });
 }
 function openOptionDialog(id, index = null) {
   window.targetBasketId = id;
@@ -2613,6 +2912,7 @@ async function loadOptionContracts() {
     window.niftyReferenceClose = Number(j.referenceClose) || null;
     window.niftyReferenceCloseDay = day;
     window.niftyReferenceDate = j.referenceDate || null;
+    syncBulkReferenceClose();
     $("strike-reference").textContent = window.niftyReferenceClose
       ? `NIFTY prior close ${formatSmartMoney(window.niftyReferenceClose)} · ${formatSmartDate(j.referenceDate)}`
       : "Prior close unavailable";
@@ -2796,18 +3096,19 @@ function addPosition(position = null) {
   const p = position || formPosition(),
     basket = state.baskets.find((b) => b.id === window.targetBasketId);
   if (!p || !basket) return;
-  invalidateResults();
   if (
     window.editPositionIndex === null ||
     window.editPositionIndex === undefined
   )
     basket.items.push(p);
   else basket.items[window.editPositionIndex] = p;
+  delete window.basketPnlResults[basket.id];
   window.editPositionIndex = null;
   saveState();
-  renderBaskets();
   $("error").hidden = true;
   $("option-dialog").close();
+  renderBaskets({ onlyBasketId: basket.id });
+  scheduleRefresh({ renderBasketCards: basket.id });
 }
 async function upstoxHistory(
   instrumentKey,
@@ -3151,6 +3452,8 @@ async function loadTrade(
     chartBaskets = statBaskets;
   if (!day) {
     $("output").hidden = true;
+    $("output").classList.remove("loading");
+    $("output").setAttribute("aria-busy", "false");
     window.chartData = null;
     window.miniChartData = null;
     window.basketPnlResults = {};
@@ -3173,18 +3476,18 @@ async function loadTrade(
       b.items.some((p) => p.enabled !== false && p.expiry < day),
     )
   ) {
-    $("output").hidden = true;
+    $("output").classList.remove("loading");
+    $("output").setAttribute("aria-busy", "false");
     showError("An option expiry must be on or after the selected day.");
     return;
   }
   $("error").hidden = true;
   $("output").hidden = !chartBaskets.length;
-  if (chartBaskets.length && renderBasketCards)
+  if (chartBaskets.length)
     $("output").classList.add("loading");
+  $("output").setAttribute("aria-busy", "true");
   $("empty").hidden = true;
   setChartTooltipVisible($("chart-tooltip"), false);
-  const ctx = chartCanvas.getContext("2d");
-  if (renderBasketCards) ctx.clearRect(0, 0, chartCanvas.width, chartCanvas.height);
   try {
     const interval = $("interval").value,
       indexPromise = loadNiftyIndex(day, interval)
@@ -3320,6 +3623,7 @@ async function loadTrade(
     if (!chartBaskets.length) {
       $("output").hidden = true;
       $("output").classList.remove("loading");
+      $("output").setAttribute("aria-busy", "false");
       window.chartData = null;
       return;
     }
@@ -3367,7 +3671,7 @@ async function loadTrade(
     drawMiniPlots(window.miniChartData);
   } catch (e) {
     if (generation === requestGeneration) {
-      $("output").hidden = true;
+      $("output").classList.remove("loading");
       $("output").setAttribute("aria-busy", "false");
       showError(e.message || "Could not load prices.");
     }
@@ -4352,4 +4656,5 @@ $("token-cancel").addEventListener("click", () => $("token-dialog").close());
 $("token-disconnect").addEventListener("click", disconnectUpstox);
 renderBaskets();
 syncBulkOffsetPickerFromBaskets();
+syncBulkCenterInput();
 checkUpstox();
