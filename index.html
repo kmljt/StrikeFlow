@@ -852,6 +852,21 @@
       .date-display #date-label {
         pointer-events: none;
       }
+      .trading-day-expiry-note {
+        display: flex;
+        min-height: 46px;
+        align-items: center;
+        box-sizing: border-box;
+        margin: 0;
+        padding: 8px 12px;
+        border: 1px solid #2b3036;
+        border-radius: 10px;
+        background: #08090b;
+        color: #a4abb3;
+        font-size: 12px;
+        line-height: 1.4;
+        font-variant-numeric: tabular-nums;
+      }
       .date-display input {
         position: absolute;
         inset: 0;
@@ -3672,11 +3687,11 @@
       @media(max-width:620px){.instrument-title-line{gap:7px}.instrument-name{font-size:15px}.lot-size-button{width:30px;height:30px;font-size:17px}.lot-size-count{font-size:13px;min-width:82px}}
       .chart-hover-readout{position:relative;z-index:12;height:0;min-width:0;margin:0}
       .chart-hover-readout .chart-tooltip{position:absolute;right:0;bottom:8px;box-sizing:border-box;width:max-content;min-width:min(190px,100%);max-width:min(320px,calc(100vw - 32px));max-height:min(60vh,360px);overflow:auto;padding:8px 11px;pointer-events:none}
-      #basket-legend,#percent-legend{display:flex;flex-direction:column;align-items:stretch;gap:3px;margin:7px 4px 4px}
-      #basket-legend>span,#percent-legend>span{min-width:0;min-height:22px;gap:7px;padding:0;border:0;border-radius:0;background:none}
-      #basket-legend>span>span,#percent-legend>span>span{min-width:0;padding:0;border:0;border-radius:0;background:none;font-size:12px}
-      #basket-legend>span>i,#percent-legend>span>i{width:6px;height:6px;flex:0 0 6px}
-      #basket-legend .legend-change,#percent-legend .legend-change{margin-left:auto;font-size:12px;opacity:1}
+      #basket-legend{display:flex;flex-direction:column;align-items:stretch;gap:3px;margin:7px 4px 4px}
+      #basket-legend>span{min-width:0;min-height:22px;gap:7px;padding:0;border:0;border-radius:0;background:none}
+      #basket-legend>span>span{min-width:0;padding:0;border:0;border-radius:0;background:none;font-size:12px}
+      #basket-legend>span>i{width:6px;height:6px;flex:0 0 6px}
+      #basket-legend .legend-change{margin-left:auto;font-size:12px;opacity:1}
       #basket-legend .legend-value{margin-left:auto;font-size:12px;font-weight:700;white-space:nowrap}
       #basket-legend .legend-change{margin-left:0}
       .chart-hover-placeholder{display:none}
@@ -3716,6 +3731,30 @@
       @media(max-width:760px){.mobile-only-control{display:grid!important}.contents-lots-count,.contents-strike-readout{display:inline-flex!important}.contents-value-input,.contents-lots-edit{display:none!important}.basket-contents-row{grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:10px;padding:10px}.basket-contents-details{display:grid;grid-template-columns:minmax(105px,.8fr) auto;align-items:center;gap:8px}.basket-contents-lots{grid-column:2;grid-row:1;align-self:start;margin-top:0}.basket-item{grid-template-columns:18px minmax(0,1fr)!important}}
       @media(max-width:540px){#basket-contents-dialog{width:calc(100% - 20px);max-height:85vh;border-radius:15px}.basket-contents-shell{gap:12px;padding:15px}.basket-contents-row{gap:10px;padding:10px}.basket-contents-strike,.basket-contents-lots{align-self:start}.basket-contents-footer .button{min-height:42px}.basket-contents-details>span{font-size:11px}}
       @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+      .controls{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .controls>.date-field,.controls>.interval-field,.controls>.expiry-field,.controls>.date-expiry-summary{grid-column:auto;min-width:0}
+      .controls>.basket-control-actions{grid-column:1/-1;min-width:0}
+      .date-expiry-summary{align-self:stretch;padding-top:22px}
+      .performance-stat-value{display:flex;align-items:baseline;justify-content:space-between;gap:6px;min-width:0}
+      .performance-stat-value>strong{min-width:0;overflow:hidden;color:#e6e9ec;font-size:14px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+      .performance-stat-value>strong.green{color:var(--green)}
+      .performance-stat-value>strong.red{color:var(--red)}
+      .performance-change{flex:0 0 auto;color:#aab1b8;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+      .performance-change.green{color:#72d9b4}
+      .performance-change.red{color:#ed8a81}
+      .performance-stat[data-metric="best-recovery"]>span{color:#72d9b4}
+      .performance-stat[data-metric="largest-decline"]>span{color:#c2a0f2}
+      @media(max-width:520px){.performance-stat-value>strong{font-size:12px}.performance-change{font-size:10px}}
+      .trading-week-controls{display:grid;grid-template-columns:32px minmax(0,1fr) 32px;align-items:center;gap:6px;box-sizing:border-box;width:100%;height:46px;min-width:0;padding:0 6px;border:1px solid color-mix(in srgb,var(--site-accent) 30%,#2b3036);border-radius:12px;background:linear-gradient(145deg,color-mix(in srgb,var(--site-accent) 9%,#0b0d10),#08090b 76%);box-shadow:inset 0 1px 0 #ffffff0a,0 5px 14px color-mix(in srgb,var(--site-accent) 7%,transparent)}
+      .trading-week-step{display:grid;place-items:center;width:32px;height:32px;padding:0;border:1px solid transparent;border-radius:10px;background:color-mix(in srgb,var(--site-accent) 5%,#101216);color:#aeb4bb;font:650 18px/1 system-ui,sans-serif;cursor:pointer;transition:background .15s ease,border-color .15s ease,color .15s ease}
+      .trading-week-step:hover:not(:disabled){border-color:color-mix(in srgb,var(--site-accent) 32%,transparent);background:color-mix(in srgb,var(--site-accent) 14%,#101216);color:var(--site-accent)}
+      .trading-week-step:focus-visible{outline:2px solid var(--site-accent);outline-offset:2px}
+      .trading-week-step:disabled{opacity:.34;cursor:not-allowed}
+      .date-expiry-summary .trading-day-expiry-note{height:100%;display:grid;align-content:center;gap:2px;min-width:0;padding:2px 0;border:0;border-radius:0;background:transparent;box-shadow:none;color:#e3e6ea}
+      .trading-day-weekday{color:var(--site-accent);font-size:16px;font-weight:750;line-height:1.1;text-transform:uppercase;letter-spacing:.06em}
+      .trading-day-countdown{color:#aeb5be;font-size:11px;font-weight:650;line-height:1.2}
+      @media(max-width:520px){.controls{grid-template-columns:repeat(2,minmax(0,1fr))}.controls>.expiry-field{grid-column:auto}}
+      @media(max-width:380px){.controls{grid-template-columns:minmax(0,1fr)}.controls>.date-field,.controls>.interval-field,.controls>.expiry-field,.controls>.date-expiry-summary{grid-column:1}.date-expiry-summary{padding-top:0}.trading-week-controls{height:auto;min-height:58px}.date-expiry-summary .trading-day-expiry-note{height:auto;min-height:58px}}
     </style>
   </head>
   <body>
@@ -3786,7 +3825,6 @@
             <div id="empty" class="chart-empty" hidden></div>
           </div>
         </section>
-        <div id="basket-legend" class="basket-legend"></div>
         <section id="percent-plot" class="mini-plot percent-plot">
           <h3>Basket change (%)</h3>
           <div class="chart-hover-readout">
@@ -3803,7 +3841,6 @@
             ></canvas>
             <div id="percent-empty" class="mini-empty" hidden></div>
           </div>
-          <div id="percent-legend" class="basket-legend mini-legend"></div>
         </section>
       </section>
       <div class="basket-section-head">
@@ -3853,6 +3890,20 @@
               </div>
             </div>
         </div>
+        <div class="field date-expiry-summary">
+          <div class="trading-week-controls">
+            <button id="trading-week-prev" class="trading-week-step" type="button" aria-label="Previous week, same weekday">−</button>
+            <small id="trading-day-expiry-note" class="trading-day-expiry-note" aria-live="polite"></small>
+            <button id="trading-week-next" class="trading-week-step" type="button" aria-label="Next week, same weekday">+</button>
+          </div>
+        </div>
+        <div class="field expiry-field">
+          <label for="expiry">NIFTY 50 option expiry</label
+          ><select id="expiry" disabled>
+            <option value="">Option expiry unavailable</option>
+          </select>
+          <small id="expiry-history-note" class="expiry-history-note" hidden></small>
+        </div>
         <div class="field interval-field">
           <label for="interval">Price interval</label>
           <select id="interval" aria-label="Price interval">
@@ -3861,13 +3912,6 @@
             <option value="15minute">15 minutes</option>
             <option value="30minute">30 minutes</option>
           </select>
-        </div>
-        <div class="field expiry-field">
-          <label for="expiry">NIFTY 50 option expiry</label
-          ><select id="expiry" disabled>
-            <option value="">Option expiry unavailable</option>
-          </select>
-          <small id="expiry-history-note" class="expiry-history-note" hidden></small>
         </div>
         <div class="basket-control-actions">
           <button id="new-basket" class="button secondary" type="button">

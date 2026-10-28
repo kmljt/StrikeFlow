@@ -1,5 +1,6 @@
 const UPSTOX_TOKEN_KEY = "strikeflow-upstox-token";
 const LAST_TRADING_DAY_KEY = "pnl-last-trading-day";
+const DEFAULT_STRANGLE_OFFSETS = [0, 100, 200, 300, 400, 500];
 const nativeFetch = window.fetch.bind(window);
 window.fetch = (input, init = {}) => {
   const raw = typeof input === "string" ? input : input.url;
@@ -59,6 +60,7 @@ if (
 ) lastDay = savedTradingDay;
 dateField.value = lastDay;
 $("date-label").textContent = formatDate(dateField.value);
+syncTradingDayExpiryNote();
 function applySiteAccent(color) {
   const rgb = [1, 3, 5]
       .map((i) => parseInt(color.slice(i, i + 2), 16) / 255)
@@ -136,7 +138,6 @@ function refreshBasketColors() {
         index = state.baskets.indexOf(basket);
       b.color = basketLineColor(index, basket?.accentColor);
     });
-    renderLegend(window.chartData.baskets);
     draw(window.chartData);
   }
   if (window.miniChartData) {
@@ -149,9 +150,20 @@ function refreshBasketColors() {
   }
 }
 let state = loadState(),
+  initializeDefaultBasketsOnStart =
+    !state.keepEmptyOnStart &&
+    (!state.baskets.length ||
+      (state.baskets.length === 1 &&
+        state.baskets[0].id === "basket-1" &&
+        state.baskets[0].name === "Basket 1" &&
+        !state.baskets[0].items?.length)),
   refreshTimer = null,
   requestGeneration = 0,
   siteAccentColor = "#ff9f43";
+if (initializeDefaultBasketsOnStart) {
+  state.baskets = [];
+  state.activeId = null;
+}
 try {
   const savedSiteAccent = localStorage.getItem("pnl-site-accent-color");
   if (savedSiteAccent && /^#[0-9a-f]{6}$/i.test(savedSiteAccent))
@@ -242,6 +254,7 @@ $("basket-offset-options").addEventListener("change", (event) => {
 });
 $("expiry").addEventListener("change", scheduleSmartStrangle);
 $("expiry").addEventListener("change", scheduleSimpleStrangle);
+$("expiry").addEventListener("change", syncTradingDayExpiryNote);
 dateField.addEventListener("change", scheduleSmartStrangle);
 dateField.addEventListener("change", scheduleSimpleStrangle);
 $("basket-dialog").addEventListener("close", finishBasketDialog);
@@ -346,13 +359,12 @@ dateField.addEventListener("change", () => {
   localStorage.setItem(LAST_TRADING_DAY_KEY, dateField.value);
   $("date-label").textContent = formatDate(dateField.value);
   state.baskets = [];
+  state.keepEmptyOnStart = false;
   saveState();
   syncBulkOffsetPickerFromBaskets();
   state.bulkAdderUsed = true;
   syncBulkOffsetPickerFromBaskets();
-  document.querySelectorAll('input[name="basket-offset-toggle"]').forEach((input) => {
-    input.checked = [0, 100, 200, 300, 400, 500].includes(Number(input.value));
-  });
+  selectDefaultStrangleOffsets();
   saveState();
   window.activeScenarioBasketId = null;
   window.basketPnlResults = {};
@@ -365,6 +377,7 @@ dateField.addEventListener("change", () => {
     $("dates").textContent = `Updating · ${formatDate(dateField.value)}`;
   }
   renderExpiries();
+  syncTradingDayExpiryNote();
   state.bulkContext = {
     day: dateField.value,
     expiry: $("expiry").value,
@@ -452,6 +465,7 @@ async function addDefaultDateBaskets(day, expiry, requestId) {
     if (requestId === dateBasketRequest && dateField.value === day) {
       clearBasketTransition();
       $("baskets").replaceChildren();
+      syncBulkOffsetPickerFromBaskets();
       showError(error.message || "Could not add the default strangles for this date.");
       scheduleRefresh();
     }
@@ -467,14 +481,13 @@ function resetBasketsForExpiry() {
   clearTimeout(refreshTimer);
   ++requestGeneration;
   state.baskets = [];
+  state.keepEmptyOnStart = false;
   state.bulkAdderUsed = true;
   state.bulkContext = { day, expiry, center: null, lots: 1 };
   saveState();
   syncBulkCenterInput();
   syncBulkOffsetPickerFromBaskets();
-  document.querySelectorAll('input[name="basket-offset-toggle"]').forEach((input) => {
-    input.checked = [0, 100, 200, 300, 400, 500].includes(Number(input.value));
-  });
+  selectDefaultStrangleOffsets();
   saveState();
   window.activeScenarioBasketId = null;
   window.basketPnlResults = {};
@@ -495,6 +508,24 @@ function syncTradingDayButtons() {
   while (nextDay <= todayLocal && isMarketClosed(nextDay))
     nextDay = addDays(nextDay, 1);
   $("trading-day-next").disabled = nextDay > todayLocal;
+  $("trading-week-prev").disabled = !getTradingWeekDate(-1);
+  $("trading-week-next").disabled = !getTradingWeekDate(1);
+}
+function getTradingWeekDate(direction) {
+  let candidate = dateField.value;
+  for (let attempts = 0; attempts < 5200; attempts++) {
+    candidate = addDays(candidate, direction * 7);
+    if (direction > 0 && candidate > todayLocal) return null;
+    if (!isMarketClosed(candidate)) return candidate;
+  }
+  return null;
+}
+function moveTradingWeek(direction) {
+  const candidate = getTradingWeekDate(direction);
+  if (!candidate) return;
+  dateField.value = candidate;
+  dateField.dispatchEvent(new Event("change", { bubbles: true }));
+  if (!$("date-picker").hidden) renderCalendar();
 }
 function moveTradingDay(direction) {
   let candidate = dateField.value;
@@ -510,6 +541,8 @@ function moveTradingDay(direction) {
 }
 $("trading-day-prev").addEventListener("click", () => moveTradingDay(-1));
 $("trading-day-next").addEventListener("click", () => moveTradingDay(1));
+$("trading-week-prev").addEventListener("click", () => moveTradingWeek(-1));
+$("trading-week-next").addEventListener("click", () => moveTradingWeek(1));
 syncTradingDayButtons();
 $("date-open").addEventListener("click", () => {
   const picker = $("date-picker");
@@ -635,18 +668,12 @@ function loadState() {
     }
   } catch {}
   return {
-    activeId: "basket-1",
-    baskets: [
-      {
-        id: "basket-1",
-        name: "Basket 1",
-        accentColor: basketAccentHex(0),
-        items: [],
-      },
-    ],
+    activeId: null,
+    baskets: [],
   };
 }
 function saveState() {
+  if (state.baskets.length) state.keepEmptyOnStart = false;
   localStorage.setItem("pnl-baskets", JSON.stringify(state));
 }
 function formatDate(day) {
@@ -656,6 +683,51 @@ function formatDate(day) {
     year: "numeric",
     timeZone: "UTC",
   }).format(new Date(`${day}T00:00:00Z`));
+}
+function formatWeekday(day) {
+  if (!day) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    weekday: "long",
+    timeZone: "UTC",
+  }).format(new Date(`${day}T00:00:00Z`));
+}
+function syncTradingDayExpiryNote() {
+  const note = $("trading-day-expiry-note"),
+    day = dateField.value,
+    expiry = $("expiry").value,
+    weekday = formatWeekday(day);
+  if (!day || !expiry || expiry < day) {
+    setTradingDayDetails(
+      weekday,
+      !day
+        ? "Choose a trading day"
+        : expiry
+          ? "Expiry is before this trading day"
+          : "Choose an expiry to see trading days remaining",
+    );
+    return;
+  }
+  let count = 0;
+  for (let cursor = day; cursor < expiry; cursor = addDays(cursor, 1)) {
+    if (!isMarketClosed(cursor)) count++;
+  }
+  const countdown =
+    count === 0
+      ? "Expiry day"
+      : count <= 4
+        ? `${["", "One", "Two", "Three", "Four"][count]} day${count === 1 ? "" : "s"} before expiry`
+        : `${count} trading days before expiry`;
+  setTradingDayDetails(weekday, countdown);
+}
+function setTradingDayDetails(weekday, countdown) {
+  const note = $("trading-day-expiry-note"),
+    dayLine = document.createElement("span"),
+    countdownLine = document.createElement("span");
+  dayLine.className = "trading-day-weekday";
+  dayLine.textContent = weekday;
+  countdownLine.className = "trading-day-countdown";
+  countdownLine.textContent = countdown;
+  note.replaceChildren(...(weekday ? [dayLine, countdownLine] : [countdownLine]));
 }
 function renderCalendar() {
   const year = calendarMonth.getUTCFullYear(),
@@ -740,11 +812,28 @@ function setActionIcon(button, type, label) {
   button.title = label;
 }
 function intradayStats(points) {
+  const firstPoint = points[0],
+    startingPnl = Number(firstPoint?.pnl) || 0;
   let maxProfit = { value: 0, t: null },
     maxLoss = { value: 0, t: null },
-    peak = 0,
-    peakTime = null,
-    maxDrawdown = { value: 0, from: null, to: null };
+    peak = startingPnl,
+    peakTime = firstPoint?.t || null,
+    maxDrawdown = {
+      value: 0,
+      from: firstPoint?.t || null,
+      to: null,
+      fromPnl: startingPnl,
+      toPnl: null,
+    },
+    trough = startingPnl,
+    troughTime = firstPoint?.t || null,
+    maxDrawup = {
+      value: 0,
+      from: firstPoint?.t || null,
+      to: null,
+      fromPnl: startingPnl,
+      toPnl: null,
+    };
   for (const point of points) {
     if (point.pnl > maxProfit.value)
       maxProfit = { value: point.pnl, t: point.t };
@@ -755,9 +844,28 @@ function intradayStats(points) {
     }
     const drawdown = peak - point.pnl;
     if (drawdown > maxDrawdown.value)
-      maxDrawdown = { value: drawdown, from: peakTime, to: point.t };
+      maxDrawdown = {
+        value: drawdown,
+        from: peakTime,
+        to: point.t,
+        fromPnl: peak,
+        toPnl: point.pnl,
+      };
+    const drawup = point.pnl - trough;
+    if (drawup > maxDrawup.value)
+      maxDrawup = {
+        value: drawup,
+        from: troughTime,
+        to: point.t,
+        fromPnl: trough,
+        toPnl: point.pnl,
+      };
+    if (point.pnl < trough) {
+      trough = point.pnl;
+      troughTime = point.t;
+    }
   }
-  return { maxProfit, maxLoss, maxDrawdown };
+  return { maxProfit, maxLoss, maxDrawdown, maxDrawup };
 }
 function renderBaskets(options = {}) {
   const host = $("baskets");
@@ -1053,16 +1161,24 @@ function renderBaskets(options = {}) {
     const performance = document.createElement("div");
     performance.className = "basket-performance";
     const stats = valid ? intradayStats(result.points) : null,
-      kept =
-        stats && stats.maxProfit.value > 0
-          ? Math.max(0, (result.ending / stats.maxProfit.value) * 100)
-          : null;
+      costBasis = valid ? Number(result.buyValue) || 0 : 0,
+      percentFromPreviousClose = (change) =>
+        stats && costBasis > 0
+          ? percentChange(costBasis, costBasis + change)
+          : "—",
+      percentBetweenTimes = (fromPnl, toPnl) =>
+        stats && costBasis > 0 && costBasis + fromPnl > 0
+          ? percentChange(costBasis + fromPnl, costBasis + toPnl)
+          : "—";
     const performanceItems = [
       [
         "Max profit",
         stats ? signed(stats.maxProfit.value) : "—",
         stats && stats.maxProfit.t ? time(stats.maxProfit.t) : "",
         stats && stats.maxProfit.value > 0 ? "green" : "",
+        stats && stats.maxProfit.t
+          ? percentFromPreviousClose(stats.maxProfit.value)
+          : "—",
       ],
       [
         "Max loss",
@@ -1073,33 +1189,63 @@ function renderBaskets(options = {}) {
           : "—",
         stats && stats.maxLoss.t ? time(stats.maxLoss.t) : "",
         stats && stats.maxLoss.value < 0 ? "red" : "",
+        stats && stats.maxLoss.t
+          ? percentFromPreviousClose(stats.maxLoss.value)
+          : "—",
       ],
       [
-        "Drawdown",
+        "Best recovery",
+        stats ? signed(stats.maxDrawup.value) : "—",
+        stats && stats.maxDrawup.to
+          ? `${stats.maxDrawup.from ? time(stats.maxDrawup.from) : "Open"}–${time(stats.maxDrawup.to)}`
+          : "",
+        stats && stats.maxDrawup.value > 0 ? "green" : "",
+        stats && stats.maxDrawup.to
+          ? percentBetweenTimes(stats.maxDrawup.fromPnl, stats.maxDrawup.toPnl)
+          : "—",
+      ],
+      [
+        "Largest decline",
         stats ? `−${money(stats.maxDrawdown.value)}` : "—",
         stats && stats.maxDrawdown.to
           ? `${stats.maxDrawdown.from ? time(stats.maxDrawdown.from) : "Open"}–${time(stats.maxDrawdown.to)}`
           : "",
         stats && stats.maxDrawdown.value > 0 ? "red" : "",
-      ],
-      [
-        "Kept",
-        kept === null ? "—" : `${kept.toFixed(1)}%`,
-        "",
-        kept === null ? "" : kept > 0 ? "green" : "red",
+        stats && stats.maxDrawdown.to
+          ? percentBetweenTimes(stats.maxDrawdown.fromPnl, stats.maxDrawdown.toPnl)
+          : "—",
       ],
     ];
-    for (const [label, value, note, color] of performanceItems) {
+    for (const [label, value, note, color, change] of performanceItems) {
       const item = document.createElement("div");
       item.className = "performance-stat";
+      item.dataset.metric = label.toLowerCase().replaceAll(" ", "-");
       const caption = document.createElement("span");
       caption.textContent = label;
       const val = document.createElement("strong");
       val.textContent = value;
       if (color) val.className = color;
+      const valueLine = document.createElement("div");
+      valueLine.className = "performance-stat-value";
+      const percent = document.createElement("span");
+      percent.className = "performance-change";
+      percent.textContent = change;
+      const percentBasis =
+        label === "Max profit" || label === "Max loss"
+          ? "relative to previous-day close"
+          : "across the displayed intraday interval";
+      percent.title = `Percentage change ${percentBasis}`;
+      percent.setAttribute(
+        "aria-label",
+        `${change} percentage change ${percentBasis}`,
+      );
+      if (change.startsWith("+")) percent.classList.add("green");
+      else if (change.startsWith("−") || change.startsWith("-"))
+        percent.classList.add("red");
+      valueLine.append(val, percent);
       const detail = document.createElement("small");
       detail.textContent = note;
-      item.append(caption, val, detail);
+      item.append(caption, valueLine, detail);
       performance.append(item);
     }
     const list = document.createElement("div");
@@ -1486,6 +1632,11 @@ function syncBulkOffsetPickerFromBaskets() {
     input.checked = basketOffsets.has(Number(input.value));
   });
 }
+function selectDefaultStrangleOffsets() {
+  document.querySelectorAll('input[name="basket-offset-toggle"]').forEach((input) => {
+    input.checked = DEFAULT_STRANGLE_OFFSETS.includes(Number(input.value));
+  });
+}
 function currentBulkCenter() {
   const context = state.bulkContext || {};
   if (
@@ -1735,6 +1886,7 @@ async function toggleBulkBasketOffset(input) {
 function clearAllBaskets() {
   if (!state.baskets.length) return;
   state.baskets = [];
+  state.keepEmptyOnStart = true;
   saveState();
   syncBulkOffsetPickerFromBaskets();
   window.activeScenarioBasketId = null;
@@ -2845,6 +2997,16 @@ async function loadExpiries() {
     }
     renderExpiries();
     if (select.value) await loadOptionContracts();
+    if (initializeDefaultBasketsOnStart && !state.baskets.length && select.value) {
+      initializeDefaultBasketsOnStart = false;
+      selectDefaultStrangleOffsets();
+      showBasketTransition("Building default strangles…");
+      await addDefaultDateBaskets(
+        dateField.value,
+        select.value,
+        ++dateBasketRequest,
+      );
+    }
     scheduleSmartStrangle();
     return true;
   } catch (e) {
@@ -2874,6 +3036,7 @@ function renderExpiries() {
     );
     select.disabled = true;
     setManualControlsEnabled(false);
+    syncTradingDayExpiryNote();
     return;
   }
   values.forEach((d) =>
@@ -2891,6 +3054,7 @@ function renderExpiries() {
   );
   select.disabled = false;
   select.value = values[0];
+  syncTradingDayExpiryNote();
 }
 async function loadOptionContracts() {
   const expiry = $("expiry").value,
@@ -3658,7 +3822,6 @@ async function loadTrade(
     window.chartXRange = xRange;
     $("title").textContent = "Options P&L";
     $("dates").textContent = formatDate(day);
-    renderLegend(compared);
     $("output").classList.remove("loading");
     $("output").setAttribute("aria-busy", "false");
     window.chartData = { times, series, baskets: compared, xRange };
@@ -3692,8 +3855,6 @@ async function loadNiftyOnly(
   setChartTooltipVisible($("percent-tooltip"), false);
   $("empty").textContent = "Add a basket to see P&L comparisons.";
   $("empty").hidden = false;
-  $("basket-legend").replaceChildren();
-  $("percent-legend").replaceChildren();
   const chart = $("chart"),
     percentChart = $("percent-chart");
   chart.getContext("2d").clearRect(0, 0, chart.width, chart.height);
@@ -3729,26 +3890,6 @@ async function loadNiftyOnly(
     if (generation === requestGeneration)
       $("output").setAttribute("aria-busy", "false");
   }
-}
-function renderLegend(data) {
-  const el = $("basket-legend");
-  el.replaceChildren(
-    ...sortBasketInfo(data).map((b) => {
-      const item = document.createElement("span"),
-        dot = document.createElement("i"),
-        name = document.createElement("span"),
-        amount = document.createElement("strong"),
-        change = document.createElement("small");
-      dot.style.background = b.color;
-      name.textContent = graphBasketName(b);
-      amount.className = `legend-value ${b.ending >= 0 ? "green" : "red"}`;
-      amount.textContent = signed(b.ending);
-      change.className = `legend-change ${b.percent >= 0 ? "green" : "red"}`;
-      change.textContent = `${b.percent >= 0 ? "+" : ""}${b.percent.toFixed(2)}%`;
-      item.append(dot, name, amount, change);
-      return item;
-    }),
-  );
 }
 function niceAxis(lo, hi, target = 5) {
   if (lo === hi) {
@@ -4168,23 +4309,7 @@ function drawMiniPlots(data) {
       .getContext("2d")
       .clearRect(0, 0, niftyCanvas.width, niftyCanvas.height);
   }
-  const percent = data.percent,
-    legend = $("percent-legend");
-  legend.replaceChildren(
-    ...sortBasketInfo(percent.series).map((s) => {
-      const item = document.createElement("span"),
-        dot = document.createElement("i"),
-        name = document.createElement("span"),
-        change = document.createElement("small"),
-        value = s.values.at(-1) || 0;
-      dot.style.background = s.color;
-      name.textContent = graphBasketName(s);
-      change.className = `legend-change ${value >= 0 ? "green" : "red"}`;
-      change.textContent = `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
-      item.append(dot, name, change);
-      return item;
-    }),
-  );
+  const percent = data.percent;
   $("percent-empty").hidden = percent.series.length > 0;
   if (!percent.series.length) {
     $("percent-empty").textContent = "No baskets selected";
