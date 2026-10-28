@@ -556,6 +556,15 @@ $("date-open").addEventListener("click", () => {
     $("date-open").setAttribute("aria-expanded", "false");
   }
 });
+$("date-today").addEventListener("click", () => {
+  let tradingDay = todayLocal;
+  while (isMarketClosed(tradingDay)) tradingDay = addDays(tradingDay, -1);
+  $("date-picker").hidden = true;
+  $("date-open").setAttribute("aria-expanded", "false");
+  if (dateField.value === tradingDay) return;
+  dateField.value = tradingDay;
+  dateField.dispatchEvent(new Event("change", { bubbles: true }));
+});
 $("month-prev").addEventListener("click", () => {
   calendarMonth.setUTCMonth(calendarMonth.getUTCMonth() - 1);
   renderCalendar();

@@ -1554,6 +1554,33 @@
         color: #cfadff;
         filter: drop-shadow(0 0 7px #b176ff55);
       }
+      .date-display > #date-open span:last-child {
+        color: #f2f4f6;
+        filter: none;
+      }
+      .date-display > #date-today {
+        display: grid;
+        width: 32px;
+        height: 32px;
+        flex: 0 0 32px;
+        place-items: center;
+        justify-content: center;
+        padding: 0;
+        border-radius: 9px;
+        color: var(--site-accent);
+      }
+      .date-display > #date-today:hover {
+        background: color-mix(in srgb, var(--site-accent) 12%, transparent);
+      }
+      .date-display > #date-today svg {
+        width: 16px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
       .date-picker {
         position: absolute;
         z-index: 10;
@@ -3859,8 +3886,8 @@
                 type="button"
                 aria-label="Choose trading day"
               >
-                <span id="date-label"></span
-                ><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="10" rx="2"/><path d="M5.5 2v3M10.5 2v3M2.5 6.5h11"/></svg></button
+                <span id="date-label"></span></button
+              ><button id="date-today" type="button" aria-label="Jump to current trading day" title="Jump to current trading day"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="10" rx="2"/><path d="M5.5 2v3M10.5 2v3M2.5 6.5h11"/><circle cx="8" cy="9.5" r="1.4"/></svg></button
               ><button id="trading-day-next" class="trading-day-step" type="button" aria-label="Next trading day"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg></button
               ><input
                 id="date"
