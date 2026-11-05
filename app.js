@@ -1,5 +1,6 @@
 const UPSTOX_TOKEN_KEY = "strikeflow-upstox-token";
 const LAST_TRADING_DAY_KEY = "pnl-last-trading-day";
+const HAPTIC_CLICK_MS = 10;
 const ENTRY_TIME_KEY = "strikeflow-entry-time";
 const DEFAULT_STRANGLE_OFFSETS = [0, 100, 200, 300, 400, 500];
 const MARKET_KEY = "strikeflow-market";
@@ -936,7 +937,7 @@ function chartTouchStart(canvas, showHover) {
     canvas.dataset.hoverCandle = next;
     if (event.pointerType === "touch") {
       try {
-        navigator.vibrate?.(4);
+        navigator.vibrate?.(HAPTIC_CLICK_MS);
       } catch {}
     }
   });
@@ -1831,7 +1832,7 @@ function renderBaskets(options = {}) {
             if (spot !== undefined && String(spot) !== canvas.dataset.hoverSpot) {
               canvas.dataset.hoverSpot = String(spot);
               try {
-                navigator.vibrate?.(4);
+                navigator.vibrate?.(HAPTIC_CLICK_MS);
               } catch {}
             }
             return;
