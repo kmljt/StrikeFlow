@@ -1,6 +1,15 @@
 const UPSTOX_TOKEN_KEY = "strikeflow-upstox-token";
 const LAST_TRADING_DAY_KEY = "pnl-last-trading-day";
+const ENTRY_TIME_KEY = "strikeflow-entry-time";
 const DEFAULT_STRANGLE_OFFSETS = [0, 100, 200, 300, 400, 500];
+const MARKET_KEY = "strikeflow-market";
+let selectedMarket = localStorage.getItem(MARKET_KEY) === "SENSEX" ? "SENSEX" : "NIFTY";
+let selectedEntryTime = ["15:20", "15:30", "15:40"].includes(localStorage.getItem(ENTRY_TIME_KEY))
+  ? localStorage.getItem(ENTRY_TIME_KEY)
+  : "15:40";
+const marketInfo = () => selectedMarket === "SENSEX"
+  ? { name: "SENSEX", lotSize: Number(window.marketLotSize) || 20, step: 100, yahoo: "^BSESN" }
+  : { name: "NIFTY", lotSize: Number(window.marketLotSize) || 65, step: 50, yahoo: "^NSEI" };
 const nativeFetch = window.fetch.bind(window);
 window.fetch = (input, init = {}) => {
   const raw = typeof input === "string" ? input : input.url;
@@ -10,6 +19,11 @@ window.fetch = (input, init = {}) => {
       ),
       token = localStorage.getItem(UPSTOX_TOKEN_KEY);
     if (token) headers.set("Authorization", `Bearer ${token}`);
+    if (raw.includes("/api/upstox/nifty-") && !raw.includes("/api/upstox/config")) {
+      const url = new URL(raw, location.origin);
+      if (!url.searchParams.has("market")) url.searchParams.set("market", selectedMarket);
+      input = `${url.pathname}${url.search}`;
+    }
     init = { ...init, headers };
   }
   return nativeFetch(input, init);
@@ -39,6 +53,150 @@ function isMarketClosed(day) {
   const weekday = new Date(`${day}T00:00:00Z`).getUTCDay();
   return (weekday === 0 || weekday === 6) && day !== "2026-11-08";
 }
+$("market").value = selectedMarket;
+$("entry-time").value = selectedEntryTime;
+function syncMarketUi() {
+  const info = marketInfo();
+  document.title = `StrikeFlow · ${info.name} Options P&L`;
+  $("brand-market").textContent = `${info.name} OPTIONS`;
+  const marketLabel = selectedMarket === "NIFTY" ? "NIFTY 50 · NSE" : "SENSEX · BSE";
+  $("market-current").textContent = marketLabel;
+  document.querySelectorAll(".market-option").forEach((option) => {
+    option.setAttribute("aria-selected", String(option.dataset.market === selectedMarket));
+  });
+  document.querySelectorAll(".market-name").forEach((node) => node.textContent = info.name);
+  $("expiry-market-label").textContent = info.name === "NIFTY" ? "NIFTY 50" : info.name;
+  const indexHeading = $("index-chart-title");
+  if (indexHeading) indexHeading.textContent = info.name === "NIFTY" ? "NIFTY 50" : info.name;
+  const lotsLabel = document.querySelector('label[for="lots"]');
+  if (lotsLabel) lotsLabel.textContent = `Lots · ${info.lotSize} each`;
+  const center = $("bulk-strangle-center");
+  if (center) { center.step = info.step; center.min = info.step; }
+  $("bulk-center-decrease").setAttribute("aria-label", `Decrease bulk center by ${info.step}`);
+  $("bulk-center-increase").setAttribute("aria-label", `Increase bulk center by ${info.step}`);
+  $("bulk-center-reset").setAttribute("aria-label", `Reset center to rounded ${info.name} entry reference`);
+  $("bulk-center-reset").title = `Reset to rounded ${info.name} entry reference`;
+  for (const id of ["simple-strangle-center", "simple-strangle-otm", "strike-input"]) {
+    const field = $(id);
+    if (field) { field.step = info.step; if (id === "simple-strangle-center") field.min = info.step; }
+  }
+  document.querySelectorAll('.picker-step-button[data-step-target="simple-strangle-center"]').forEach((button) => {
+    const direction = Number(button.dataset.stepDirection) < 0 ? "Decrease" : "Increase";
+    button.setAttribute("aria-label", `${direction} strangle center by ${info.step}`);
+  });
+  const options = $("basket-offset-options");
+  if (options) {
+    options.replaceChildren();
+    for (let offset = -200; offset <= 1000; offset += info.step) {
+      const label = document.createElement("label"), checkbox = document.createElement("input");
+      checkbox.type = "checkbox"; checkbox.name = "basket-offset-toggle"; checkbox.value = String(offset);
+      label.append(checkbox, document.createTextNode(Number(offset).toLocaleString("en-IN")));
+      options.append(label);
+    }
+  }
+}
+syncMarketUi();
+const marketPicker = $("market-picker"), marketTrigger = $("market-trigger"), marketMenu = $("market-menu");
+function setMarketMenuOpen(open, focusSelected = false) {
+  marketPicker.classList.toggle("is-open", open);
+  marketTrigger.setAttribute("aria-expanded", String(open));
+  if (open && focusSelected) {
+    const selectedOption = marketMenu.querySelector('[aria-selected="true"]');
+    selectedOption?.focus();
+  }
+}
+marketTrigger.addEventListener("click", () => {
+  setMarketMenuOpen(!marketPicker.classList.contains("is-open"));
+});
+marketTrigger.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    setMarketMenuOpen(true, true);
+  }
+});
+marketMenu.addEventListener("click", (event) => {
+  const option = event.target.closest(".market-option");
+  if (!option) return;
+  if (option.dataset.market !== selectedMarket) {
+    $("market").value = option.dataset.market;
+    $("market").dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  setMarketMenuOpen(false);
+  marketTrigger.focus({ preventScroll: true });
+});
+marketMenu.addEventListener("keydown", (event) => {
+  const options = [...marketMenu.querySelectorAll(".market-option")], current = options.indexOf(document.activeElement);
+  if (event.key === "Escape") {
+    event.preventDefault();
+    setMarketMenuOpen(false);
+    marketTrigger.focus({ preventScroll: true });
+  } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 : (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+    options[next]?.focus();
+  }
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!marketPicker.contains(event.target)) setMarketMenuOpen(false);
+});
+$("market").addEventListener("change", async () => {
+  selectedMarket = $("market").value === "SENSEX" ? "SENSEX" : "NIFTY";
+  localStorage.setItem(MARKET_KEY, selectedMarket);
+  window.marketLotSize = null;
+  syncMarketUi();
+  state.baskets = []; state.activeId = null; state.bulkContext = null; state.keepEmptyOnStart = false;
+  initializeDefaultBasketsOnStart = true;
+  saveState(); renderBaskets();
+  window.expiryOptions = []; window.availableExpiries = [];
+  window.niftyReferenceClose = null; window.niftyReferenceCloseDay = null;
+  await loadExpiries();
+  scheduleRefresh();
+});
+$("entry-time").addEventListener("change", () => {
+  const day = dateField.value,
+    previousReference = window.niftyReferenceCloseDay === day &&
+        window.niftyReferenceClose !== null && window.niftyReferenceClose !== ""
+      ? Number(window.niftyReferenceClose)
+      : NaN,
+    previousReferenceCenter = Number.isFinite(previousReference)
+      ? Math.round(previousReference / marketInfo().step) * marketInfo().step
+      : null,
+    bulkFollowedReference = previousReferenceCenter !== null && currentBulkCenter() === previousReferenceCenter,
+    simpleCenterInput = $("simple-strangle-center"),
+    simpleCenter = Number(simpleCenterInput.value),
+    simpleFollowedReference = previousReferenceCenter !== null && simpleCenter === previousReferenceCenter;
+  selectedEntryTime = ["15:20", "15:30", "15:40"].includes($("entry-time").value)
+    ? $("entry-time").value
+    : "15:40";
+  localStorage.setItem(ENTRY_TIME_KEY, selectedEntryTime);
+  window.niftyReferenceClose = null;
+  window.niftyReferenceCloseDay = null;
+  scheduleSmartStrangle();
+  loadOptionContracts().then(async () => {
+    if (selectedEntryTime !== $("entry-time").value || dateField.value !== day) return;
+    const reference = window.niftyReferenceCloseDay === day
+        ? Number(window.niftyReferenceClose)
+        : NaN,
+      nextReferenceCenter = Number.isFinite(reference)
+        ? Math.round(reference / marketInfo().step) * marketInfo().step
+        : null;
+    if (simpleFollowedReference && nextReferenceCenter !== null) {
+      simpleCenterInput.value = String(nextReferenceCenter);
+      syncStepButtons("simple-strangle-center");
+    }
+    const bulkUpdate =
+      bulkFollowedReference &&
+      nextReferenceCenter !== null &&
+      nextReferenceCenter !== previousReferenceCenter
+        ? replaceBulkStranglesAtCenter(nextReferenceCenter, ++bulkCenterRequest)
+        : null;
+    if ($("strangle-dialog").open && window.strangleMode === "simple")
+      scheduleSimpleStrangle();
+    scheduleManualOptionPreview();
+    if (bulkUpdate) await bulkUpdate;
+    scheduleRefresh();
+  });
+});
 const todayLocal = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
   .toISOString()
   .slice(0, 10);
@@ -74,10 +232,14 @@ function applySiteAccent(color) {
   );
   $("site-accent-swatch").style.color = color;
 }
+const BASKET_PALETTE = [
+  "#56b4e9", "#f4a261", "#9bd64b", "#d879f9", "#2dd4bf", "#f87171",
+  "#a78bfa", "#facc15", "#60a5fa", "#fb7185", "#34d399", "#c084fc",
+  "#f97316", "#22d3ee", "#bef264", "#e879a9", "#818cf8", "#fbbf24",
+];
 function basketLineColor(index, accentColor = null) {
   if (accentColor && /^#[0-9a-f]{6}$/i.test(accentColor)) return accentColor;
-  const hue = (28 + index * 137.508) % 360;
-  return `hsl(${hue} 92% 64%)`;
+  return BASKET_PALETTE[((index % BASKET_PALETTE.length) + BASKET_PALETTE.length) % BASKET_PALETTE.length];
 }
 function basketColor(index, ending = 0, accentColor = null) {
   const hue = (28 + index * 137.508) % 360;
@@ -116,20 +278,37 @@ function randomBrightHex() {
     )
     .join("")}`;
 }
-function basketAccentHex(index) {
-  const hue = (28 + index * 137.508) % 360,
-    s = 0.92,
-    l = 0.64,
-    k = (n) => (n + hue / 30) % 12,
-    a = s * Math.min(l, 1 - l),
-    f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-  return `#${[f(0), f(8), f(4)]
-    .map((x) =>
-      Math.round(x * 255)
-        .toString(16)
-        .padStart(2, "0"),
-    )
-    .join("")}`;
+function colorLab(hex) {
+  const linear = [1, 3, 5].map((i) => {
+      const value = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    }),
+    [r, g, b] = linear,
+    x = (r * 0.4124564 + g * 0.3575761 + b * 0.1804375) / 0.95047,
+    y = r * 0.2126729 + g * 0.7151522 + b * 0.072175,
+    z = (r * 0.0193339 + g * 0.119192 + b * 0.9503041) / 1.08883,
+    f = (v) => v > 0.008856 ? Math.cbrt(v) : 7.787 * v + 16 / 116,
+    fx = f(x), fy = f(y), fz = f(z);
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+function basketAccentHex(usedBaskets = []) {
+  const used = usedBaskets
+      .map((basket) => basket.accentColor)
+      .filter((color) => /^#[0-9a-f]{6}$/i.test(color || "")),
+    usedLabs = used.map(colorLab);
+  if (!used.length) return BASKET_PALETTE[0];
+  return BASKET_PALETTE
+    .map((color, index) => ({
+      color,
+      index,
+      distance: Math.min(...usedLabs.map((lab) => {
+        const candidate = colorLab(color);
+        return Math.hypot(candidate[0] - lab[0], candidate[1] - lab[1], candidate[2] - lab[2]);
+      })),
+      used: used.some((existing) => existing.toLowerCase() === color.toLowerCase()),
+    }))
+    .filter((candidate) => !candidate.used)
+    .sort((a, b) => b.distance - a.distance || a.index - b.index)[0]?.color || randomBrightHex();
 }
 function refreshBasketColors() {
   if (window.chartData) {
@@ -200,16 +379,7 @@ let dateBasketRequest = 0;
 let bulkCenterDebounce = null;
 let bulkCenterRequest = 0;
 window.smartStrangleResult = null;
-const basketOffsetOptions = $("basket-offset-options");
-for (let offset = -200; offset <= 1000; offset += 50) {
-  const basketLabel = document.createElement("label"),
-    basketCheckbox = document.createElement("input");
-  basketCheckbox.type = "checkbox";
-  basketCheckbox.name = "basket-offset-toggle";
-  basketCheckbox.value = String(offset);
-  basketLabel.append(basketCheckbox, document.createTextNode(Number(offset).toLocaleString("en-IN")));
-  basketOffsetOptions.append(basketLabel);
-}
+syncMarketUi();
 $("new-basket").addEventListener("click", addBasket);
 $("new-strangle").addEventListener("click", openSmartStrangle);
 $("bulk-add-strangles").addEventListener("click", () => {
@@ -344,7 +514,7 @@ $("strike-input").addEventListener("input", () =>
 );
 $("strike-input").addEventListener("change", () => {
   const value = Number($("strike-input").value);
-  if (Number.isFinite(value)) setManualStrike(Math.round(value / 50) * 50);
+  if (Number.isFinite(value)) setManualStrike(Math.round(value / marketInfo().step) * marketInfo().step);
   scheduleManualOptionPreview();
 });
 $("expiry").addEventListener("change", scheduleManualOptionPreview);
@@ -401,6 +571,7 @@ dateField.addEventListener("change", () => {
     scheduleRefresh();
   }
   $("error").hidden = true;
+  $("error").classList.remove("is-info");
 });
 async function fetchSimpleStranglePick({ day, expiry, offset, lots = 1, center = null }) {
   const params = new URLSearchParams({
@@ -408,6 +579,7 @@ async function fetchSimpleStranglePick({ day, expiry, offset, lots = 1, center =
     expiry,
     otmPoints: String(offset),
     lots: String(lots),
+    entryTime: selectedEntryTime,
   });
   if (center !== null && Number.isFinite(Number(center)))
     params.set("center", String(center));
@@ -434,20 +606,25 @@ async function addDefaultDateBaskets(day, expiry, requestId) {
     }
     if (requestId !== dateBasketRequest || dateField.value !== day || state.baskets.length)
       return;
-    state.baskets = picks.map((pick, index) => ({
-      id: `date-${day}-${pick.offset}`,
-      name: `Basket ${index + 1}`,
-      customName: false,
-      enabled: true,
-      accentColor: basketAccentHex(index),
-      bulkOffset: pick.offset,
-      items: [pick.call, pick.put].map((leg) => ({
-        expiry: pick.expiry,
-        strike: Number(leg.strike),
-        optionType: leg.type,
-        lots: Number(leg.lots),
-      })),
-    }));
+    const assignedColors = [];
+    state.baskets = picks.map((pick, index) => {
+      const basket = {
+        id: `date-${day}-${pick.offset}`,
+        name: `Basket ${index + 1}`,
+        customName: false,
+        enabled: true,
+        accentColor: basketAccentHex(assignedColors),
+        bulkOffset: pick.offset,
+        items: [pick.call, pick.put].map((leg) => ({
+          expiry: pick.expiry,
+          strike: Number(leg.strike),
+          optionType: leg.type,
+          lots: Number(leg.lots),
+        })),
+      };
+      assignedColors.push(basket);
+      return basket;
+    });
     state.bulkContext = {
       day,
       expiry,
@@ -593,30 +770,173 @@ $("interval").addEventListener("change", () => {
   invalidateResults();
 });
 const chartCanvas = $("chart");
+const pnlTooltipRows = new WeakMap();
+const percentTooltipRows = new WeakMap();
+const odometerCells = new WeakMap(),
+  odometerMotion = new WeakMap();
+function retargetOdometer(strip, start, target, digit) {
+  let motion = odometerMotion.get(strip);
+  if (motion) {
+    motion.target = target;
+    motion.digit = digit;
+    return;
+  }
+  motion = { position: start, velocity: 0, target, digit, lastTime: performance.now() };
+  odometerMotion.set(strip, motion);
+  const tick = (now) => {
+    const elapsed = Math.min(0.05, Math.max(0.001, (now - motion.lastTime) / 1000));
+    motion.lastTime = now;
+    // A critically damped spring keeps the roll smooth while following a
+    // moving target, then settles without bouncing when the pointer stops.
+    const acceleration = (motion.target - motion.position) * 160 - motion.velocity * 25;
+    motion.velocity += acceleration * elapsed;
+    motion.position += motion.velocity * elapsed;
+    strip.style.transform = `translateY(-${motion.position}em)`;
+    if (Math.abs(motion.target - motion.position) < 0.012 && Math.abs(motion.velocity) < 0.06) {
+      strip.style.transform = `translateY(-${10 + motion.digit}em)`;
+      odometerMotion.delete(strip);
+      return;
+    }
+    motion.frame = requestAnimationFrame(tick);
+  };
+  motion.frame = requestAnimationFrame(tick);
+}
+function renderOdometer(element, value) {
+  const text = String(value),
+    cells = odometerCells.get(element) || new Map(),
+    parts = [];
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index],
+      position = text.length - index - 1,
+      previous = cells.get(position);
+    if (/\d/.test(char)) {
+      let cell = previous?.kind === "digit" ? previous : null;
+      if (!cell) {
+        const wheel = document.createElement("span"),
+          strip = document.createElement("span"),
+          digit = Number(char);
+        wheel.className = "odometer-digit";
+        wheel.setAttribute("aria-hidden", "true");
+        strip.className = "odometer-strip";
+        for (let turn = 0; turn < 3; turn++)
+          for (let number = 0; number <= 9; number++) {
+            const face = document.createElement("span");
+            face.textContent = String(number);
+            strip.append(face);
+          }
+        strip.style.transform = `translateY(-${10 + digit}em)`;
+        wheel.append(strip);
+        cell = { kind: "digit", element: wheel, strip, value: digit };
+      } else if (cell.value !== Number(char)) {
+        const strip = cell.strip,
+          motion = odometerMotion.get(strip),
+          currentPosition = motion?.position ?? 10 + cell.value;
+        const digit = Number(char),
+          candidates = [digit, digit + 10, digit + 20].filter((candidate) => candidate >= 0 && candidate <= 29),
+          target = candidates.sort((a, b) => Math.abs(a - currentPosition) - Math.abs(b - currentPosition))[0];
+        cell.value = digit;
+        if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+          if (motion?.frame) cancelAnimationFrame(motion.frame);
+          odometerMotion.delete(strip);
+          strip.style.transform = `translateY(-${10 + digit}em)`;
+        } else {
+          retargetOdometer(strip, currentPosition, target, digit);
+        }
+      }
+      parts.push(cell.element);
+      cells.set(position, cell);
+    } else {
+      let cell = previous?.kind === "static" ? previous : null;
+      if (!cell) {
+        const node = document.createElement("span");
+        node.className = "odometer-static";
+        node.setAttribute("aria-hidden", "true");
+        cell = { kind: "static", element: node };
+      }
+      cell.element.classList.toggle("odometer-currency", char === "₹");
+      cell.element.textContent = char;
+      parts.push(cell.element);
+      cells.set(position, cell);
+    }
+  }
+  const currentParts = element.children;
+  if (currentParts.length !== parts.length || parts.some((part, i) => currentParts[i] !== part))
+    element.replaceChildren(...parts);
+  odometerCells.set(element, cells);
+}
+function updateIndexQuote(points, targetTime = null) {
+  if (!points?.length) return;
+  const times = points.map((point) => point.t),
+    values = points.map((point) => point.value),
+    timestamp = Number.isFinite(targetTime) ? targetTime : times.at(-1),
+    price = interpolateAtTime(times, values, timestamp),
+    previousClose = Number(points.previousClose) || values[0],
+    change = price - previousClose,
+    changePercent = previousClose ? (change / previousClose) * 100 : 0,
+    money = (amount) => Math.abs(amount).toLocaleString("en-IN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  renderOdometer($("index-quote-price"), `₹${money(price)}`);
+  renderOdometer(
+    $("index-quote-change"),
+    `${change >= 0 ? "+" : "−"}₹${money(change)}  ${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}%`,
+  );
+  $("index-quote-change").classList.toggle("green", change >= 0);
+  $("index-quote-change").classList.toggle("red", change < 0);
+  $("index-quote-time").textContent = time(timestamp);
+  clearTimeout(window.indexQuoteAnnouncementTimer);
+  window.indexQuoteAnnouncementTimer = setTimeout(() => {
+    $("index-quote-announcement").textContent =
+      `${marketInfo().name} ${price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, ${change >= 0 ? "up" : "down"} ${money(change)} rupees, ${Math.abs(changePercent).toFixed(2)} percent from previous close at ${time(timestamp)}.`;
+  }, 300);
+}
+function scheduleHoverOnFrame(canvas, showHover) {
+  let frame = 0,
+    latestPointer = null;
+  const scheduled = (event) => {
+    latestPointer = {
+      currentTarget: canvas,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+    };
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      const pointer = latestPointer;
+      latestPointer = null;
+      if (pointer) showHover(pointer);
+    });
+  };
+  scheduled.cancel = () => {
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+    latestPointer = null;
+  };
+  return scheduled;
+}
 function chartTouchStart(canvas, showHover) {
   canvas.addEventListener("pointerdown", (event) => {
-    if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+    if (!["touch", "pen", "mouse"].includes(event.pointerType)) return;
     if (event.button !== 0) return;
     canvas.setPointerCapture(event.pointerId);
     showHover(event);
-    // Use the hovered timestamp because the NIFTY chart remains interactive
+    // Use the hovered timestamp because the index chart remains interactive
     // when no basket series exists to provide a basket-chart index.
-    canvas.dataset.hoverCandle = String(window.linkedHoverTime ?? "");
+    canvas.dataset.hoverCandle = String(window.hoverIndex ?? window.linkedHoverTime ?? "");
   });
   canvas.addEventListener("pointermove", (event) => {
-    if (
-      (event.pointerType !== "touch" && event.pointerType !== "pen") ||
-      !canvas.hasPointerCapture(event.pointerId)
-    )
-      return;
-    const time = window.linkedHoverTime;
-    if (time === null || time === undefined) return;
-    const next = String(time);
+    if (!canvas.hasPointerCapture(event.pointerId)) return;
+    const pointIndex = window.hoverIndex ?? window.linkedHoverTime;
+    if (pointIndex === null || pointIndex === undefined) return;
+    const next = String(pointIndex);
     if (next === canvas.dataset.hoverCandle) return;
     canvas.dataset.hoverCandle = next;
     if (event.pointerType === "touch") {
       try {
-        navigator.vibrate?.(8);
+        navigator.vibrate?.(4);
       } catch {}
     }
   });
@@ -630,21 +950,31 @@ function chartTouchStart(canvas, showHover) {
     delete canvas.dataset.hoverCandle;
   });
 }
-chartCanvas.addEventListener("pointermove", showChartHover);
+const scheduleChartHover = scheduleHoverOnFrame(chartCanvas, showChartHover);
+chartCanvas.addEventListener("pointermove", scheduleChartHover);
 chartTouchStart(chartCanvas, showChartHover);
 chartCanvas.addEventListener("pointerleave", (event) => {
-  if (event.pointerType !== "touch" && event.pointerType !== "pen")
+  scheduleChartHover.cancel();
+  if (!chartCanvas.hasPointerCapture(event.pointerId) && event.pointerType !== "touch" && event.pointerType !== "pen")
     clearChartHover();
 });
-chartCanvas.addEventListener("pointercancel", clearChartHover);
+chartCanvas.addEventListener("pointercancel", () => {
+  scheduleChartHover.cancel();
+  clearChartHover();
+});
 for (const id of ["nifty-chart", "percent-chart"]) {
-  $(id).addEventListener("pointermove", showMiniHover);
+  const canvas = $(id), scheduleMiniHover = scheduleHoverOnFrame(canvas, showMiniHover);
+  canvas.addEventListener("pointermove", scheduleMiniHover);
   chartTouchStart($(id), showMiniHover);
-  $(id).addEventListener("pointerleave", (event) => {
-    if (event.pointerType !== "touch" && event.pointerType !== "pen")
+  canvas.addEventListener("pointerleave", (event) => {
+    scheduleMiniHover.cancel();
+    if (!canvas.hasPointerCapture(event.pointerId) && event.pointerType !== "touch" && event.pointerType !== "pen")
       clearMiniHover();
   });
-  $(id).addEventListener("pointercancel", clearMiniHover);
+  canvas.addEventListener("pointercancel", () => {
+    scheduleMiniHover.cancel();
+    clearMiniHover();
+  });
 }
 window.addEventListener("resize", () => {
   if (window.chartData) draw(window.chartData);
@@ -666,11 +996,13 @@ function loadState() {
     const s = JSON.parse(localStorage.getItem("pnl-baskets") || "null");
     if (Array.isArray(s?.baskets)) {
       let changed = false;
+      const assignedColors = [];
       s.baskets.forEach((basket, index) => {
         if (!/^#[0-9a-f]{6}$/i.test(basket.accentColor || "")) {
-          basket.accentColor = basketAccentHex(index);
+          basket.accentColor = basketAccentHex([...assignedColors, ...s.baskets.slice(0, index)]);
           changed = true;
         }
+        assignedColors.push(basket);
       });
       if (changed) localStorage.setItem("pnl-baskets", JSON.stringify(s));
       return s;
@@ -1026,8 +1358,8 @@ function renderBaskets(options = {}) {
       const basis = document.createElement("span");
       basis.className = "basket-structure-reference";
       basis.textContent = Number.isFinite(reference)
-        ? `NIFTY prior close ₹${reference.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`
-        : "NIFTY prior close unavailable";
+        ? `${marketInfo().name} entry reference · ${selectedEntryTime} · ₹${reference.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`
+        : `${marketInfo().name} entry reference unavailable`;
       structure.append(basis);
     }
     const plus = document.createElement("button");
@@ -1052,7 +1384,7 @@ function renderBaskets(options = {}) {
     );
     const colorInput = document.createElement("input");
     colorInput.type = "color";
-    colorInput.value = b.accentColor || basketAccentHex(index);
+    colorInput.value = b.accentColor || basketAccentHex(state.baskets.filter((basket) => basket.id !== b.id));
     colorInput.setAttribute("aria-label", `Choose ${displayName} accent color`);
     colorInput.addEventListener("input", () => {
       b.accentColor = colorInput.value;
@@ -1241,7 +1573,7 @@ function renderBaskets(options = {}) {
       percent.textContent = change;
       const percentBasis =
         label === "Max profit" || label === "Max loss"
-          ? "relative to previous-day close"
+          ? `relative to ${selectedEntryTime} previous-session entry`
           : "across the displayed intraday interval";
       percent.title = `Percentage change ${percentBasis}`;
       percent.setAttribute(
@@ -1293,7 +1625,7 @@ function renderBaskets(options = {}) {
       const lotCount = document.createElement("span");
       lotCount.className = "lot-size-count";
       const updateLotControl = () => {
-        lotCount.textContent = `${position.lots} lot${position.lots === 1 ? "" : "s"} × 65`;
+        lotCount.textContent = `${position.lots} lot${position.lots === 1 ? "" : "s"} × ${marketInfo().lotSize}`;
         decrement.disabled = position.lots <= 1;
       };
       const changeLots = (delta) => {
@@ -1399,7 +1731,7 @@ function renderBaskets(options = {}) {
       const label = document.createElement("strong");
       label.textContent = "Scenario P&L";
       const note = document.createElement("span");
-      note.textContent = "NIFTY close vs estimated basket value";
+      note.textContent = `${marketInfo().name} price vs ${selectedEntryTime} entry`;
       scenarioTitle.append(label, note);
       const controls = document.createElement("div");
       controls.className = "scenario-controls";
@@ -1438,7 +1770,7 @@ function renderBaskets(options = {}) {
         assumptionGrid.className = "scenario-assumption-grid";
         const assumptionRows = [
           ["Volatility", ivNote, ""],
-          ["P&L anchor", `NIFTY close ₹${Math.round(result.scenario.actualSpot).toLocaleString("en-IN")}`, "is-profit"],
+          ["P&L anchor", `${marketInfo().name} close ₹${Math.round(result.scenario.actualSpot).toLocaleString("en-IN")}`, "is-profit"],
           ["Risk-free rate", "5.73% proxy", "is-loss"],
           ["Dividend yield", "0%", ""],
         ];
@@ -1460,7 +1792,7 @@ function renderBaskets(options = {}) {
         canvas.className = "scenario-chart";
         canvas.setAttribute(
           "aria-label",
-          `Estimated ${displayName} profit and loss by NIFTY closing price`,
+          `Estimated ${displayName} profit and loss by ${marketInfo().name} closing price`,
         );
         const tooltip = document.createElement("div");
         tooltip.className = "scenario-chart-tooltip";
@@ -1499,7 +1831,7 @@ function renderBaskets(options = {}) {
             if (spot !== undefined && String(spot) !== canvas.dataset.hoverSpot) {
               canvas.dataset.hoverSpot = String(spot);
               try {
-                navigator.vibrate?.(8);
+                navigator.vibrate?.(4);
               } catch {}
             }
             return;
@@ -1654,14 +1986,14 @@ function currentBulkCenter() {
     context.center !== "" &&
     Number.isFinite(Number(context.center))
   )
-    return Math.round(Number(context.center) / 50) * 50;
+    return Math.round(Number(context.center) / marketInfo().step) * marketInfo().step;
   if (
     window.niftyReferenceCloseDay === dateField.value &&
     window.niftyReferenceClose !== null &&
     window.niftyReferenceClose !== "" &&
     Number.isFinite(Number(window.niftyReferenceClose))
   )
-    return Math.round(Number(window.niftyReferenceClose) / 50) * 50;
+    return Math.round(Number(window.niftyReferenceClose) / marketInfo().step) * marketInfo().step;
   return null;
 }
 function syncBulkCenterInput() {
@@ -1676,8 +2008,8 @@ function syncBulkReferenceClose() {
     reference !== null &&
     reference !== "" &&
     Number.isFinite(Number(reference))
-      ? `Prior close · ${formatSmartMoney(Number(reference))}`
-      : "Prior close unavailable";
+      ? `Entry reference · ${selectedEntryTime} · ${formatSmartMoney(Number(reference))}`
+      : "Entry reference unavailable";
 }
 function setBulkOffsetInputsDisabled(disabled) {
   document.querySelectorAll('input[name="basket-offset-toggle"]').forEach((input) => {
@@ -1693,8 +2025,8 @@ function cancelBulkCenterUpdate() {
 }
 function stepBulkCenter(direction) {
   const input = $("bulk-strangle-center"),
-    base = Number(input.value) || currentBulkCenter() || 50,
-    next = Math.max(50, Math.min(100000, base + direction * 50));
+    base = Number(input.value) || currentBulkCenter() || marketInfo().step,
+    next = Math.max(marketInfo().step, Math.min(100000, base + direction * marketInfo().step));
   input.value = String(next);
   input.focus({ preventScroll: true });
   input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1710,7 +2042,7 @@ function resetBulkCenter() {
     $("bulk-center-status").textContent = "Prior close unavailable for this day.";
     return;
   }
-  const center = Math.round(Number(reference) / 50) * 50,
+  const center = Math.round(Number(reference) / marketInfo().step) * marketInfo().step,
     input = $("bulk-strangle-center");
   input.value = String(center);
   input.focus({ preventScroll: true });
@@ -1723,12 +2055,12 @@ function scheduleBulkCenterUpdate() {
     input = $("bulk-strangle-center"),
     raw = input.value.trim() === "" ? NaN : Number(input.value);
   setBulkOffsetInputsDisabled(true);
-  if (!Number.isFinite(raw) || raw < 50 || raw > 100000) {
-    $("bulk-center-status").textContent = "Enter a center from 50 to 100,000.";
+  if (!Number.isFinite(raw) || raw < marketInfo().step || raw > 100000) {
+    $("bulk-center-status").textContent = `Enter a center from ${marketInfo().step.toLocaleString("en-IN")} to 100,000.`;
     setBulkOffsetInputsDisabled(false);
     return;
   }
-  const center = Math.max(50, Math.min(100000, Math.round(raw / 50) * 50));
+  const center = Math.max(marketInfo().step, Math.min(100000, Math.round(raw / marketInfo().step) * marketInfo().step));
   bulkCenterDebounce = setTimeout(() => {
     bulkCenterDebounce = null;
     replaceBulkStranglesAtCenter(center, requestId);
@@ -1775,25 +2107,30 @@ async function replaceBulkStranglesAtCenter(center, requestId) {
     // guard against a superseded request or a changed trading day here.
     if (requestId !== bulkCenterRequest || dateField.value !== day) return;
     if (picks.some((pick) => Number(pick.center) !== center))
-      throw Error("The selected NIFTY center was not applied.");
+      throw Error(`The selected ${marketInfo().name} center was not applied.`);
     const oldBaskets = state.baskets.filter((basket) => offsets.includes(Number(basket.bulkOffset))),
       oldIds = oldBaskets.map((basket) => basket.id),
       oldIdSet = new Set(oldIds),
       firstBasketNumber = nextBasketNumber(),
-      newBaskets = picks.map((pick, index) => ({
-        id: `bulk-${day}-${expiry}-${pick.offset}-${Date.now()}-${index}`,
-        name: `Basket ${firstBasketNumber + index}`,
-        customName: false,
-        enabled: true,
-        accentColor: basketAccentHex(state.baskets.length + index),
-        bulkOffset: Number(pick.offset),
-        items: [pick.call, pick.put].map((leg) => ({
-          expiry: pick.expiry,
-          strike: Number(leg.strike),
-          optionType: leg.type,
-          lots: Number(leg.lots),
-        })),
-      }));
+      assignedColors = state.baskets.filter((basket) => !oldIdSet.has(basket.id));
+    const newBaskets = picks.map((pick, index) => {
+        const basket = {
+          id: `bulk-${day}-${expiry}-${pick.offset}-${Date.now()}-${index}`,
+          name: `Basket ${firstBasketNumber + index}`,
+          customName: false,
+          enabled: true,
+          accentColor: basketAccentHex(assignedColors),
+          bulkOffset: Number(pick.offset),
+          items: [pick.call, pick.put].map((leg) => ({
+            expiry: pick.expiry,
+            strike: Number(leg.strike),
+            optionType: leg.type,
+            lots: Number(leg.lots),
+          })),
+        };
+        assignedColors.push(basket);
+        return basket;
+      });
     oldIds.forEach((id) => delete window.basketPnlResults[id]);
     if (oldIdSet.has(window.activeScenarioBasketId)) window.activeScenarioBasketId = null;
     state.baskets = state.baskets.filter((basket) => !oldIdSet.has(basket.id));
@@ -1841,7 +2178,7 @@ async function toggleBulkBasketOffset(input) {
       center: context.day === dateField.value
         ? context.center
         : Number.isFinite(cachedReference)
-          ? Math.round(cachedReference / 50) * 50
+          ? Math.round(cachedReference / marketInfo().step) * marketInfo().step
           : null,
       lots: context.day === dateField.value ? Number(context.lots) || 1 : 1,
       offset,
@@ -1914,14 +2251,7 @@ function invalidateResults() {
   scheduleRefresh();
 }
 function nextBasketAccentColor() {
-  const used = new Set(
-    state.baskets.map((basket) => basket.accentColor?.toLowerCase()),
-  );
-  for (let index = 0; index <= state.baskets.length; index++) {
-    const color = basketAccentHex(index);
-    if (!used.has(color.toLowerCase())) return color;
-  }
-  return randomBrightHex();
+  return basketAccentHex(state.baskets);
 }
 function addBasket() {
   const n =
@@ -1960,7 +2290,7 @@ function openSmartStrangle() {
     ? Number(window.niftyReferenceClose)
     : NaN;
   $("simple-strangle-center").value = Number.isFinite(cachedReference)
-    ? String(Math.round(cachedReference / 50) * 50)
+    ? String(Math.round(cachedReference / marketInfo().step) * marketInfo().step)
     : "";
   syncStepButtons("simple-strangle-center");
   $("strangle-dialog").showModal();
@@ -1982,7 +2312,7 @@ function setStrangleMode(mode, refresh = true) {
 }
 function normalizeStrangleOffset(value) {
   if (!Number.isFinite(value)) return null;
-  return Math.max(-10000, Math.min(10000, Math.round(value / 50) * 50));
+  return Math.max(-10000, Math.min(10000, Math.round(value / marketInfo().step) * marketInfo().step));
 }
 function scheduleSmartStrangle() {
   clearTimeout(smartStrangleDebounce);
@@ -2049,6 +2379,7 @@ async function findSmartStrangle(requestId = ++smartStrangleRequest) {
       const query = new URLSearchParams({
         expiry,
         day,
+        entryTime: selectedEntryTime,
         type,
         otmPoints: String(offset),
         budget: String(budget / 2),
@@ -2139,7 +2470,7 @@ function scheduleSimpleStrangle() {
     offset = Number(input.value),
     lots = Number($("simple-strangle-lots").value);
   if (input.value.trim() !== "" && Number.isFinite(offset))
-    input.value = String(Math.max(-10000, Math.min(10000, Math.round(offset / 50) * 50)));
+    input.value = String(Math.max(-10000, Math.min(10000, Math.round(offset / marketInfo().step) * marketInfo().step)));
   if (!expiry || expiry < day || (rawCenter !== null && (!Number.isFinite(rawCenter) || rawCenter < 50 || rawCenter > 100000)) || input.value.trim() === "" || !Number.isFinite(offset) || offset < -10000 || offset > 10000 || !Number.isInteger(lots) || lots < 1 || lots > 10000) {
     preview.classList.remove("is-updating");
     preview.classList.add("has-error");
@@ -2154,7 +2485,7 @@ function scheduleSimpleStrangle() {
     $("strangle-add").textContent = "Add strangle";
     return;
   }
-  input.value = String(Math.max(-10000, Math.min(10000, Math.round(offset / 50) * 50)));
+  input.value = String(Math.max(-10000, Math.min(10000, Math.round(offset / marketInfo().step) * marketInfo().step)));
   simpleStrangleDebounce = setTimeout(() => findSimpleStrangle(requestId), 250);
 }
 async function findSimpleStrangle(requestId = ++simpleStrangleRequest) {
@@ -2170,9 +2501,9 @@ async function findSimpleStrangle(requestId = ++simpleStrangleRequest) {
     lots = Number($("simple-strangle-lots").value),
     center = rawCenter === null || !Number.isFinite(rawCenter)
       ? null
-      : Math.max(50, Math.min(100000, Math.round(rawCenter / 50) * 50)),
+      : Math.max(marketInfo().step, Math.min(100000, Math.round(rawCenter / marketInfo().step) * marketInfo().step)),
     offset = Number.isFinite(rawOffset) && rawOffset >= -10000
-      ? Math.max(-10000, Math.min(10000, Math.round(rawOffset / 50) * 50))
+      ? Math.max(-10000, Math.min(10000, Math.round(rawOffset / marketInfo().step) * marketInfo().step))
       : null;
   if (!expiry || expiry < day || (rawCenter !== null && (!Number.isFinite(rawCenter) || rawCenter < 50 || rawCenter > 100000)) || offset === null || input.value.trim() === "" || !Number.isInteger(lots) || lots < 1 || lots > 10000) {
     $("strangle-add").disabled = true;
@@ -2198,7 +2529,7 @@ async function findSimpleStrangle(requestId = ++simpleStrangleRequest) {
         center,
       });
       if (!Number.isInteger(Number(result.center)) || (center !== null && Number(result.center) !== center))
-        throw Error("The selected NIFTY center was not applied. Please try again.");
+        throw Error(`The selected ${marketInfo().name} center was not applied. Please try again.`);
       return result;
     };
     const result = await fetchOffset(offset);
@@ -2209,7 +2540,7 @@ async function findSimpleStrangle(requestId = ++simpleStrangleRequest) {
       centerInput.value = String(resolvedCenter);
     const renderLeg = (prefix, leg) => {
       $(`simple-${prefix}-title`).textContent = `${leg.strike} ${leg.type} · ${leg.lots} lot${leg.lots === 1 ? "" : "s"}`;
-      $(`simple-${prefix}-detail`).textContent = `${formatMoneyness(leg.actualOTM)} from prior close · ${leg.estimatedCost === null ? "previous close unavailable" : `${formatSmartMoney(leg.estimatedCost)} total`}`;
+      $(`simple-${prefix}-detail`).textContent = `${formatMoneyness(leg.actualOTM)} from entry spot · ${leg.estimatedCost === null ? "entry price unavailable" : `${formatSmartMoney(leg.estimatedCost)} total`}`;
     };
     renderLeg("call", result.call);
     renderLeg("put", result.put);
@@ -2354,7 +2685,7 @@ function renderBasketContentsDialog() {
       renderBasketContentsDialog();
     });
     const changeStrike = (delta) => {
-      const next = Number(position.strike) + delta * 50;
+      const next = Number(position.strike) + delta * marketInfo().step;
       if (!Number.isInteger(next) || next <= 0) return;
       position.strike = next;
       window.basketPnlResults[basket.id] = null;
@@ -2538,7 +2869,7 @@ function formatSmartDate(day) {
 }
 function normalizeSmartOffset(value) {
   if (!Number.isFinite(value)) return null;
-  return Math.max(-10000, Math.min(10000, Math.round(value / 50) * 50));
+  return Math.max(-10000, Math.min(10000, Math.round(value / marketInfo().step) * marketInfo().step));
 }
 function formatMoneyness(points) {
   const distance = Math.abs(points);
@@ -2588,6 +2919,7 @@ async function findSmartOption() {
     const query = new URLSearchParams({
         expiry,
         day,
+        entryTime: selectedEntryTime,
         type,
         otmPoints: String(otmPoints),
         budget: String(budget),
@@ -2608,8 +2940,8 @@ async function findSmartOption() {
     $("smart-result-title").textContent = `${result.strike} ${result.type} · ${result.lots} lot${result.lots === 1 ? "" : "s"}`;
     const detailRows = [
       ["Strike", `${formatMoneyness(result.requestedOTM)} target · ${formatMoneyness(result.actualOTM)} actual`],
-      ["NIFTY", `${formatSmartMoney(result.underlyingClose)} · ${formatSmartDate(result.underlyingDate)}`],
-      ["Option", `${formatSmartMoney(result.premiumClose)} × 65 = ${formatSmartMoney(result.premiumClose * 65)}/lot`],
+      [marketInfo().name, `${formatSmartMoney(result.underlyingClose)} · ${formatSmartDate(result.underlyingDate)} at ${result.entryTime || selectedEntryTime}`],
+      ["Option", `${formatSmartMoney(result.premiumClose)} × ${marketInfo().lotSize} = ${formatSmartMoney(result.premiumClose * marketInfo().lotSize)}/lot`],
       ["Budget", budgetDifference, result.remainingBudget >= 0 ? "smart-profit" : "smart-loss"],
     ];
     $("smart-result-details").replaceChildren(...detailRows.map(([label, value, tone]) => {
@@ -2633,7 +2965,7 @@ async function findSmartOption() {
       const title = document.createElement("strong");
       title.textContent = `${option.strike} ${option.type} · ${option.lots} lot${option.lots === 1 ? "" : "s"}`;
       const detail = document.createElement("span");
-      detail.textContent = `${formatMoneyness(option.actualOTM)} · ${formatSmartMoney(option.premiumClose * 65)}/lot · ${formatSmartMoney(option.estimatedCost)} total`;
+      detail.textContent = `${formatMoneyness(option.actualOTM)} · ${formatSmartMoney(option.premiumClose * marketInfo().lotSize)}/lot · ${formatSmartMoney(option.estimatedCost)} total`;
       const budget = document.createElement("span");
       budget.className = option.remainingBudget >= 0 ? "smart-profit" : "smart-loss";
       budget.textContent = `${formatSmartMoney(Math.abs(option.remainingBudget))} ${option.remainingBudget >= 0 ? "under" : "over"} budget`;
@@ -2767,7 +3099,13 @@ function time(ts) {
   }).format(new Date(ts * 1000));
 }
 function positionName(p) {
-  return `NIFTY ${p.strike} ${p.optionType} · ${p.expiry}`;
+  return `${marketInfo().name} ${p.strike} ${p.optionType} · ${p.expiry}`;
+}
+function strangleCenterOffset(callStrike, putStrike) {
+  const center = (Number(callStrike) + Number(putStrike)) / 2,
+    distance = Math.abs(Number(callStrike) - Number(putStrike)) / 2,
+    format = (value) => value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  return `${format(center)} ± ${format(distance)}`;
 }
 function basketDisplayName(b) {
   if (
@@ -2792,11 +3130,13 @@ function basketDisplayName(b) {
     const call = items.find((p) => p.optionType === "CE"),
       put = items.find((p) => p.optionType === "PE");
     if (call && put) {
-      if (call.strike === put.strike)
-        return `Long Straddle · ${call.strike}${expiryLabel ? ` · ${expiryLabel}` : ""}`;
-      if (call.strike > put.strike)
-        return `Long Strangle · ${put.strike}/${call.strike}${expiryLabel ? ` · ${expiryLabel}` : ""}`;
-      return `Reverse Strangle · ${put.strike}/${call.strike}${expiryLabel ? ` · ${expiryLabel}` : ""}`;
+      const centerOffset = strangleCenterOffset(call.strike, put.strike),
+        expirySuffix = expiryLabel ? ` · ${expiryLabel}` : "";
+      if (Number(call.strike) === Number(put.strike))
+        return `Long Straddle · ${centerOffset}${expirySuffix}`;
+      if (Number(call.strike) > Number(put.strike))
+        return `Long Strangle · ${centerOffset}${expirySuffix}`;
+      return `Reverse Strangle · ${centerOffset}${expirySuffix}`;
     }
     if (items.every((p) => p.optionType === items[0].optionType)) {
       const side = items[0].optionType === "CE" ? "Call" : "Put",
@@ -2852,14 +3192,12 @@ function graphBasketName(entry) {
   if (calls.length === 1 && puts.length === 1) {
     const callStrike = Number(calls[0].strike),
       putStrike = Number(puts[0].strike),
-      center = (callStrike + putStrike) / 2,
-      otmDistance = Math.abs(callStrike - putStrike) / 2,
       name = callStrike === putStrike
         ? "Straddle"
         : callStrike < putStrike
           ? "Reverse Strangle"
           : "Strangle";
-    return `${name} · ${center.toLocaleString("en-IN", { maximumFractionDigits: 2 })} ± ${otmDistance.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+    return `${name} · ${strangleCenterOffset(callStrike, putStrike)}`;
   }
   return minimalBasketName(basketInfoName(entry));
 }
@@ -2996,7 +3334,7 @@ async function loadExpiries() {
     window.availableExpiries = j.expiries || [];
     if (!window.availableExpiries.length)
       throw Error(
-        "Upstox returned no NIFTY 50 expiries. Check your token and try again.",
+        `Upstox returned no ${marketInfo().name} expiries. Check your token and try again.`,
       );
     window.expiredOptionsAvailable = j.expiredAvailable;
     if (j.expiredAvailable === false) {
@@ -3076,18 +3414,20 @@ async function loadOptionContracts() {
   }
   try {
     const r = await fetch(
-        `/api/upstox/nifty-options?${new URLSearchParams({ expiry, day })}`,
+        `/api/upstox/nifty-options?${new URLSearchParams({ expiry, day, entryTime: selectedEntryTime })}`,
       ),
       j = await r.json();
     if (requestId !== optionContractsRequest) return;
     if (!r.ok) throw Error(j.error || "Could not load options.");
     window.expiryOptions = j.options || [];
+    window.marketLotSize = Number(j.lotSize) || null;
+    syncMarketUi();
     window.niftyReferenceClose = Number(j.referenceClose) || null;
     window.niftyReferenceCloseDay = day;
     window.niftyReferenceDate = j.referenceDate || null;
     syncBulkReferenceClose();
     $("strike-reference").textContent = window.niftyReferenceClose
-      ? `NIFTY prior close ${formatSmartMoney(window.niftyReferenceClose)} · ${formatSmartDate(j.referenceDate)}`
+      ? `${marketInfo().name} at ${selectedEntryTime} · ${formatSmartMoney(window.niftyReferenceClose)} · ${formatSmartDate(j.referenceDate)}`
       : "Prior close unavailable";
     setManualControlsEnabled(window.expiryOptions.length > 0);
     configureManualOptionFields(window.manualOptionSeed || null);
@@ -3117,7 +3457,7 @@ function configureManualOptionFields(position = null) {
       : null,
     target = position?.strike ?? (referenceClose === null
       ? null
-      : Math.round(referenceClose / 50) * 50);
+      : Math.round(referenceClose / marketInfo().step) * marketInfo().step);
   $("option-type-select").value = type;
   $("lots").value = String(position?.lots || $("lots").value || 1);
   $("lots").dispatchEvent(new Event("input", { bubbles: true }));
@@ -3135,7 +3475,7 @@ function setManualStrike(target = null) {
   const desired = target !== null && target !== undefined && Number.isFinite(Number(target))
     ? Number(target)
     : (window.niftyReferenceCloseDay === dateField.value && window.niftyReferenceClose !== null
-      ? Math.round(window.niftyReferenceClose / 50) * 50
+      ? Math.round(window.niftyReferenceClose / marketInfo().step) * marketInfo().step
       : strikes[0]);
   const strike = strikes.reduce((best, value) =>
     Math.abs(value - desired) < Math.abs(best - desired) ? value : best,
@@ -3199,6 +3539,7 @@ async function loadManualOptionPreview({ requestId, type, strike, lots, referenc
     const query = new URLSearchParams({
         expiry: $("expiry").value,
         day: dateField.value,
+        entryTime: selectedEntryTime,
         type,
         strike: String(strike),
       }),
@@ -3206,18 +3547,18 @@ async function loadManualOptionPreview({ requestId, type, strike, lots, referenc
       result = await response.json();
     if (requestId !== manualOptionPreviewRequest) return;
     if (!response.ok) throw Error(result.error || "Could not load this option price.");
-    const lotSize = Number(result.lotSize) || 65,
+    const lotSize = Number(result.lotSize) || marketInfo().lotSize,
       premium = Number(result.premiumPrice),
       perLot = premium * lotSize,
       total = perLot * lots,
       actualOffset = Math.round(type === "CE" ? strike - reference : reference - strike),
       rows = [
-        ["DISTANCE", `${formatMoneyness(actualOffset)} from prior close`],
-        ["NIFTY", window.niftyReferenceDate
+        ["DISTANCE", `${formatMoneyness(actualOffset)} from ${selectedEntryTime} entry spot`],
+        [marketInfo().name, window.niftyReferenceDate
           ? `${formatSmartMoney(reference)} · ${formatSmartDate(window.niftyReferenceDate)}`
           : formatSmartMoney(reference)],
         ["PREMIUM/LOT", Number.isFinite(premium) && premium > 0
-          ? `${formatSmartMoney(premium)} × ${lotSize} = ${formatSmartMoney(perLot)} · ${formatSmartDate(result.premiumDate)} close`
+          ? `${formatSmartMoney(premium)} × ${lotSize} = ${formatSmartMoney(perLot)} · ${formatSmartDate(result.premiumDate)} at ${selectedEntryTime}`
           : "Previous-session close unavailable"],
         ...(Number(result.currentPrice) > 0
           ? [["TODAY’S LTP", formatSmartMoney(Number(result.currentPrice))]]
@@ -3258,7 +3599,7 @@ function formPosition() {
     optionType = $("option-type-select").value,
     lots = Number($("lots").value);
   if (!expiry || expiry < dateField.value || !Number.isInteger(strike))
-    return showError("Choose an expiry and select a NIFTY option.");
+    return showError(`Choose an expiry and select a ${marketInfo().name} option.`);
   if (!listedStrikes(optionType).includes(strike))
     return showError("Choose a listed strike for that option type.");
   if (!Number.isInteger(lots) || lots < 1)
@@ -3305,10 +3646,10 @@ async function upstoxHistory(
   return j;
 }
 async function loadNiftyIndex(day, interval) {
-  const q = new URLSearchParams({ day, interval }),
+  const q = new URLSearchParams({ day, interval, entryTime: selectedEntryTime }),
     r = await fetch(`/api/upstox/nifty-index-history?${q}`),
     j = await r.json();
-  if (!r.ok) throw Error(j.error || "Could not load NIFTY 50 prices.");
+  if (!r.ok) throw Error(j.error || `Could not load ${marketInfo().name} prices.`);
   let points = (j.candles || [])
     .map((c) => ({
       t: Math.floor(new Date(c[0]).getTime() / 1000),
@@ -3324,7 +3665,7 @@ async function loadNiftyIndex(day, interval) {
         "30minute": "30m",
       }[interval],
       yq = new URLSearchParams({
-        symbol: "^NSEI",
+        symbol: marketInfo().yahoo,
         period1: String(epoch(day)),
         period2: String(epoch(addDays(day, 1))),
         interval: yahooInterval,
@@ -3341,22 +3682,25 @@ async function loadNiftyIndex(day, interval) {
   }
   if (!points.length)
     throw Error(
-      `No ${interval.replace("minute", "-minute ")}prices were returned for NIFTY 50.`,
+      `No ${interval.replace("minute", "-minute ")}prices were returned for ${marketInfo().name}.`,
     );
   points.previousClose = Number(j.previousClose) || points[0].value;
   return points;
 }
 async function resolveNiftyOption(expiry, strike, type) {
-  const q = new URLSearchParams({ expiry, strike: String(strike), type }),
+  const q = new URLSearchParams({ expiry, strike: String(strike), type, market: selectedMarket }),
     r = await fetch(`/api/upstox/nifty-contract?${q}`),
     j = await r.json();
-  if (!r.ok) throw Error(j.error || "Could not find that NIFTY option.");
+  if (!r.ok) throw Error(j.error || `Could not find that ${marketInfo().name} option.`);
   return j;
+}
+function entryCutoffTimestamp(day, entryTime = selectedEntryTime) {
+  return Math.floor(Date.parse(`${day}T${entryTime}:00+05:30`) / 1000);
 }
 async function calculatePosition(p, day, interval) {
   const contract = await resolveNiftyOption(p.expiry, p.strike, p.optionType),
     expired = p.expiry < todayLocal,
-    multiplier = p.lots * 65,
+    multiplier = p.lots * (Number(contract.lotSize) || marketInfo().lotSize),
     [intra, daily] = await Promise.all([
       upstoxHistory(
         contract.instrumentKey,
@@ -3388,7 +3732,6 @@ async function calculatePosition(p, day, interval) {
   if (!prior.length)
     throw Error(`${positionName(p)} has no previous trading-session close.`);
   const priorClose = prior.at(-1),
-    buy = priorClose.close,
     buyDate = istDay(priorClose.t),
     candles = (intra.candles || [])
       .map((c) => ({
@@ -3397,10 +3740,32 @@ async function calculatePosition(p, day, interval) {
       }))
       .filter((x) => istDay(x.t) === day && Number.isFinite(x.close))
       .sort((a, b) => a.t - b.t);
-  if (!candles.length)
-    throw Error(
-      `No ${interval.replace("minute", "-minute ")}prices were returned for ${positionName(p)}.`,
-    );
+  const entryHistory = await upstoxHistory(
+      contract.instrumentKey,
+      buyDate,
+      addDays(buyDate, 1),
+      "1minute",
+      expired,
+      p.expiry,
+    ),
+    entryCutoff = entryCutoffTimestamp(buyDate),
+    entryCandles = (entryHistory.candles || [])
+      .map((c) => ({
+        t: Math.floor(new Date(c[0]).getTime() / 1000),
+        close: Number(c[4]),
+      }))
+      .filter((c) => istDay(c.t) === buyDate && c.t + 60 <= entryCutoff && Number.isFinite(c.close))
+      .sort((a, b) => a.t - b.t),
+    entry = entryCandles.at(-1);
+  if (!entry)
+    throw Error(`No ${positionName(p)} price was available by ${selectedEntryTime} on ${formatDate(buyDate)}.`);
+  const buy = entry.close;
+  const missingIntradayData = candles.length === 0;
+  if (missingIntradayData) {
+    // Keep the basket visible when Upstox has no intraday trades for an option;
+    // its price is held at the chosen entry until real candles are available.
+    candles.push({ t: epoch(day) + 3 * 3600 + 45 * 60, close: buy });
+  }
   const close = candles.at(-1).close,
     ending = (close - buy) * multiplier,
     points = candles.map((c) => ({
@@ -3411,6 +3776,8 @@ async function calculatePosition(p, day, interval) {
     name: positionName(p),
     buy,
     buyDate,
+    buyTime: selectedEntryTime,
+    missingIntradayData,
     close,
     multiplier,
     ending,
@@ -3476,7 +3843,7 @@ function inferScenarioVol(result, position, indexPoints, day) {
     Tbuy = Math.max(
       0,
       (Date.parse(`${position.expiry}T10:00:00Z`) -
-        Date.parse(`${result.buyDate}T10:00:00Z`)) /
+        Date.parse(`${result.buyDate}T${result.buyTime || selectedEntryTime}:00+05:30`)) /
         1000 /
         SECONDS_PER_YEAR,
     );
@@ -3527,7 +3894,7 @@ function scenarioPnlAt(legs, spot) {
   );
 }
 function buildScenario(basket, positions, indexPoints, day, fallbackVol = 0.2) {
-  if (!indexPoints?.length) return { error: "NIFTY close is unavailable." };
+  if (!indexPoints?.length) return { error: `${marketInfo().name} close is unavailable.` };
   const actualSpot = indexPoints.at(-1).value,
     legs = [];
   let fallbackCount = 0;
@@ -3655,6 +4022,7 @@ async function loadTrade(
     return;
   }
   $("error").hidden = true;
+  $("error").classList.remove("is-info");
   $("output").hidden = !chartBaskets.length;
   if (chartBaskets.length)
     $("output").classList.add("loading");
@@ -3716,13 +4084,22 @@ async function loadTrade(
     if (generation !== requestGeneration) return;
     const indexResult = await indexPromise;
     if (generation !== requestGeneration) return;
+    const heldAtEntryFallback = data.some((basket) =>
+      basket.positions.some((position) => position.missingIntradayData),
+    );
     if (unavailableBaskets.length) {
       const names = unavailableBaskets
         .map((result) => basketDisplayName(result.basket))
         .join(", ");
       showError(
-        `${names} could not be priced at ${interval.replace("minute", "-minute ")}resolution and were left out of the P&L charts. ${unavailableBaskets[0].error.message}`,
+        `${names} could not be priced at ${interval.replace("minute", "-minute ")}resolution and were left out of the P&L charts. ${unavailableBaskets[0].error.message}${heldAtEntryFallback ? " Options with no intraday candles are held at their entry price." : ""}`,
       );
+    } else if (heldAtEntryFallback) {
+      const notes = [];
+      if (heldAtEntryFallback)
+        notes.push("Options with no intraday candles are held at their entry price for the chart.");
+      showError(notes.join(" "));
+      $("error").classList.add("is-info");
     }
     const basketVols = data
         .flatMap((b) => {
@@ -3938,7 +4315,7 @@ function addScenarioControls(host, ref) {
   add("+", "Zoom in", () => zoomScenario(ref, 0.8));
   add("←", "Pan left", () => panScenario(ref, -0.2));
   add("→", "Pan right", () => panScenario(ref, 0.2));
-  add("Reset", "Reset to ±1,000 NIFTY points", () => {
+  add("Reset", `Reset to ±1,000 ${marketInfo().name} points`, () => {
     const [lo, hi] = defaultScenarioView(ref.scenario);
     setScenarioView(ref, lo, hi);
   });
@@ -4151,6 +4528,7 @@ function positionTopTooltip(tooltip, x, width, gap = 12) {
   tooltip.style.top = "10px";
 }
 function setChartTooltipVisible(tooltip, visible) {
+  if (!tooltip) return;
   tooltip.hidden = !visible;
   const placeholder = tooltip.parentElement?.querySelector(
     ".chart-hover-placeholder",
@@ -4181,7 +4559,7 @@ function showScenarioHover(e, ref) {
     pnlPercent = document.createElement("strong"),
     changePercent = ref.buyValue > 0 ? (pnl / ref.buyValue) * 100 : null,
     tone = pnl > 0 ? "green" : pnl < 0 ? "red" : "";
-  spotLabel.textContent = `NIFTY ${Math.round(spot).toLocaleString("en-IN")} ·`;
+  spotLabel.textContent = `${marketInfo().name} ${Math.round(spot).toLocaleString("en-IN")} ·`;
   pnlValue.textContent = signed(pnl);
   separator.textContent = "·";
   pnlPercent.textContent =
@@ -4217,6 +4595,17 @@ function nearestTimeIndex(times, t) {
   return lo > 0 && Math.abs(times[lo - 1] - t) <= Math.abs(times[lo] - t)
     ? lo - 1
     : lo;
+}
+function interpolateAtTime(times, values, target) {
+  if (!times?.length || !values?.length) return 0;
+  if (target <= times[0]) return values[0];
+  if (target >= times.at(-1)) return values.at(-1);
+  let right = 1;
+  while (right < times.length && times[right] < target) right++;
+  const left = right - 1,
+    duration = times[right] - times[left],
+    progress = duration > 0 ? (target - times[left]) / duration : 0;
+  return values[left] + (values[right] - values[left]) * progress;
 }
 function chartTimeTicks() {
   const { start, end } = window.chartXRange || {};
@@ -4305,6 +4694,13 @@ function drawMiniPlots(data) {
   const niftyCanvas = $("nifty-chart"),
     niftyStatus = $("nifty-empty");
   if (data.index.points?.length) {
+    updateIndexQuote(data.index.points, window.linkedHoverTime);
+  } else {
+    $("index-quote-price").textContent = "—";
+    $("index-quote-change").textContent = "";
+    $("index-quote-time").textContent = "";
+  }
+  if (data.index.points?.length) {
     niftyStatus.hidden = true;
     drawNiftyPlot(
       niftyCanvas,
@@ -4312,7 +4708,7 @@ function drawMiniPlots(data) {
       data.index.points.previousClose,
     );
   } else {
-    niftyStatus.textContent = data.index.error || "NIFTY 50 prices unavailable";
+    niftyStatus.textContent = data.index.error || `${marketInfo().name} prices unavailable`;
     niftyStatus.hidden = false;
     niftyCanvas
       .getContext("2d")
@@ -4432,9 +4828,13 @@ function drawNiftyPlot(canvas, points, previousClose) {
           window.linkedHoverTime,
         );
   if (i >= 0) {
-    const x = X(i),
-      hoverX = chartX(window.linkedHoverTime, p, w),
-      y = Y(points[i].value);
+    const hoverX = chartX(window.linkedHoverTime, p, w),
+      hoverValue = interpolateAtTime(
+        points.map((point) => point.t),
+        points.map((point) => point.value),
+        window.linkedHoverTime,
+      ),
+      y = Y(hoverValue);
     ctx.save();
     ctx.setLineDash([4, 5]);
     ctx.strokeStyle = "#a3aea7aa";
@@ -4444,8 +4844,8 @@ function drawNiftyPlot(canvas, points, previousClose) {
     ctx.stroke();
     ctx.restore();
     ctx.beginPath();
-    ctx.arc(x, y, 3.5, 0, Math.PI * 2);
-    ctx.fillStyle = points[i].value >= baseline ? green : red;
+    ctx.arc(hoverX, y, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = hoverValue >= baseline ? green : red;
     ctx.fill();
     ctx.strokeStyle = "#eaf3ee";
     ctx.lineWidth = 1.2;
@@ -4510,8 +4910,7 @@ function drawMiniPlot(canvas, times, series, mode) {
       ? -1
       : nearestTimeIndex(times, window.linkedHoverTime);
   if (i >= 0) {
-    const px = X(i),
-      hoverX = chartX(window.linkedHoverTime, p, w);
+    const hoverX = chartX(window.linkedHoverTime, p, w);
     ctx.save();
     ctx.setLineDash([4, 5]);
     ctx.strokeStyle = "#a3aea7aa";
@@ -4521,8 +4920,9 @@ function drawMiniPlot(canvas, times, series, mode) {
     ctx.stroke();
     ctx.restore();
     series.forEach((s) => {
+      const hoverValue = interpolateAtTime(times, s.values, window.linkedHoverTime);
       ctx.beginPath();
-      ctx.arc(px, Y(s.values[i]), 3.5, 0, Math.PI * 2);
+      ctx.arc(hoverX, Y(hoverValue), 3.5, 0, Math.PI * 2);
       ctx.fillStyle = s.color;
       ctx.fill();
       ctx.strokeStyle = "#eaf3ee";
@@ -4540,7 +4940,7 @@ function showMiniHover(e) {
         ? d?.index.points?.length
           ? [
               {
-                name: "NIFTY 50",
+                name: marketInfo().name === "NIFTY" ? "NIFTY 50" : "SENSEX",
                 color:
                   d.index.points.at(-1).value >= d.index.points.previousClose
                     ? "#37c997"
@@ -4556,10 +4956,13 @@ function showMiniHover(e) {
         : d?.percent.times || [];
   if (!times.length || !series.length) return;
   const rect = canvas.getBoundingClientRect(),
-    x = e.clientX - rect.left,
     pad = { l: 58, r: 14 },
     pw = rect.width - pad.l - pad.r;
-  if (x < pad.l || x > rect.width - pad.r) return clearMiniHover();
+  let x = e.clientX - rect.left;
+  if (x < pad.l || x > rect.width - pad.r) {
+    if (!canvas.hasPointerCapture(e.pointerId)) return clearMiniHover();
+    x = Math.max(pad.l, Math.min(rect.width - pad.r, x));
+  }
   const target =
       (window.chartXRange?.start || times[0]) +
       ((x - pad.l) / pw) *
@@ -4567,68 +4970,54 @@ function showMiniHover(e) {
           (window.chartXRange?.start || times[0])),
     i = nearestTimeIndex(times, target),
     t = times[i];
-  window.linkedHoverTime = t;
-  window.hoverIndex = window.chartData
-    ? nearestTimeIndex(window.chartData.times, t)
-    : null;
-  const tip = $(mode === "price" ? "nifty-tooltip" : "percent-tooltip");
-  $(
-    mode === "price" ? "nifty-tooltip-time" : "percent-tooltip-time",
-  ).textContent = time(t);
-  const rows = $(
-    mode === "price" ? "nifty-tooltip-rows" : "percent-tooltip-rows",
-  );
-  rows.replaceChildren(
-    ...series.map((s) => {
-      const row = document.createElement("div");
-      row.className = "tooltip-row";
-      const label = document.createElement("span");
-      label.textContent =
-        mode === "price"
-          ? s.name
-          : graphBasketName(s);
-      label.style.color = s.color;
-      if (mode === "price") {
-        const value = document.createElement("div");
-        value.className = "tooltip-basket-value";
-        const amount = document.createElement("b");
-        amount.textContent = s.values[i].toLocaleString("en-IN", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        });
-        const change = document.createElement("small");
-        change.className = "tooltip-basket-change";
-        const previous = d.index.points.previousClose;
-        if (previous) {
-          const changePercent = ((s.values[i] - previous) / previous) * 100;
-          change.classList.add(changePercent >= 0 ? "green" : "red");
-          change.textContent = `${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}%`;
-        } else {
-          change.textContent = "—";
+  window.linkedHoverTime = target;
+  window.hoverIndex = i;
+  if (mode === "percent") {
+    const tip = $("percent-tooltip"),
+      rows = $("percent-tooltip-rows");
+    $("percent-tooltip-time").textContent = time(t);
+    const rowCache = percentTooltipRows.get(rows) || new Map(),
+      activeNames = new Set(),
+      nextRows = series.map((s) => {
+        const key = s.id ?? graphBasketName(s),
+          percent = s.values[i],
+          percentText = `${percent >= 0 ? "+" : ""}${percent.toFixed(2)}%`;
+        activeNames.add(key);
+        let entry = rowCache.get(key);
+        if (!entry) {
+          const row = document.createElement("div"),
+            label = document.createElement("span"),
+            value = document.createElement("b");
+          row.className = "tooltip-row";
+          value.className = "tooltip-basket-percent";
+          row.append(label, value);
+          entry = { row, label, value };
+          rowCache.set(key, entry);
         }
-        value.append(amount, change);
-        row.append(label, value);
-      } else {
-        const value = document.createElement("b");
-        value.textContent = `${s.values[i] >= 0 ? "+" : ""}${s.values[i].toFixed(2)}%`;
-        value.className = s.values[i] >= 0 ? "green" : "red";
-        row.append(label, value);
-      }
-      return row;
-    }),
-  );
-  setChartTooltipVisible(tip, true);
-  positionTopTooltip(tip, x, rect.width);
+        entry.label.textContent = graphBasketName(s);
+        entry.label.style.color = s.color;
+        entry.value.className = `tooltip-basket-percent ${percent >= 0 ? "green" : "red"}`;
+        entry.value.setAttribute("aria-label", percentText);
+        renderOdometer(entry.value, percentText);
+        return entry.row;
+      });
+    for (const key of rowCache.keys()) if (!activeNames.has(key)) rowCache.delete(key);
+    const currentRows = rows.children;
+    if (currentRows.length !== nextRows.length || nextRows.some((row, index) => currentRows[index] !== row))
+      rows.replaceChildren(...nextRows);
+    percentTooltipRows.set(rows, rowCache);
+    setChartTooltipVisible(tip, true);
+    positionTopTooltip(tip, x, rect.width);
+  } else {
+    setChartTooltipVisible($("percent-tooltip"), false);
+  }
   setChartTooltipVisible($("chart-tooltip"), false);
-  setChartTooltipVisible($("nifty-tooltip"), mode === "price");
-  setChartTooltipVisible($("percent-tooltip"), mode === "percent");
   if (window.chartData) draw(window.chartData);
   drawMiniPlots(d);
 }
 function clearMiniHover() {
   window.linkedHoverTime = null;
   window.hoverIndex = null;
-  setChartTooltipVisible($("nifty-tooltip"), false);
   setChartTooltipVisible($("percent-tooltip"), false);
   setChartTooltipVisible($("chart-tooltip"), false);
   if (window.chartData) draw(window.chartData);
@@ -4636,6 +5025,7 @@ function clearMiniHover() {
 }
 function showError(s) {
   $("error").textContent = s;
+  $("error").classList.remove("is-info");
   $("error").hidden = false;
   if ($("option-dialog").open) {
     $("option-error").textContent = s;
@@ -4646,54 +5036,75 @@ function showChartHover(e) {
   const d = window.chartData;
   if (!d?.series.length) return;
   const rect = chartCanvas.getBoundingClientRect(),
-    x = e.clientX - rect.left,
-    y = e.clientY - rect.top,
     pad = { l: 58, r: 14, t: 18, b: 32 },
     pw = rect.width - pad.l - pad.r;
+  let x = e.clientX - rect.left,
+    y = e.clientY - rect.top;
   if (
     x < pad.l ||
     x > rect.width - pad.r ||
     y < pad.t ||
     y > rect.height - pad.b
-  )
-    return clearChartHover();
+  ) {
+    if (!chartCanvas.hasPointerCapture(e.pointerId)) return clearChartHover();
+    x = Math.max(pad.l, Math.min(rect.width - pad.r, x));
+    y = Math.max(pad.t, Math.min(rect.height - pad.b, y));
+  }
   const target =
       (window.chartXRange?.start || d.times[0]) +
       ((x - pad.l) / pw) *
         ((window.chartXRange?.end || d.times.at(-1)) -
           (window.chartXRange?.start || d.times[0])),
     i = nearestTimeIndex(d.times, target);
-  window.linkedHoverTime = d.times[i];
+  window.linkedHoverTime = target;
   window.hoverIndex = i;
   $("tooltip-time").textContent = time(d.times[i]);
-  const rows = $("tooltip-rows");
-  rows.replaceChildren(
-    ...sortBasketInfo(d.baskets.map((basket, index) => ({ ...basket, index }))).map((b) => {
-      const row = document.createElement("div");
-      row.className = "tooltip-row";
-      const label = document.createElement("span");
-      label.className = "tooltip-basket-name";
-      label.textContent = graphBasketName(b);
-      label.style.color = b.color;
-      const value = document.createElement("div");
-      value.className = "tooltip-basket-value";
-      const amount = document.createElement("b");
-      amount.textContent = signed(d.series[i].values[b.index]);
-      amount.className = d.series[i].values[b.index] >= 0 ? "green" : "red";
-      const change = document.createElement("small");
-      change.className = "tooltip-basket-change";
-      change.textContent = b.buyValue
-        ? `${d.series[i].values[b.index] >= 0 ? "+" : ""}${((d.series[i].values[b.index] / b.buyValue) * 100).toFixed(2)}%`
-        : "—";
-      value.append(amount, change);
-      row.append(label, value);
-      return row;
-    }),
-  );
+  const rows = $("tooltip-rows"),
+    rowCache = pnlTooltipRows.get(rows) || new Map(),
+    baskets = sortBasketInfo(d.baskets.map((basket, index) => ({ ...basket, index }))),
+    activeIds = new Set(),
+    nextRows = baskets.map((basket) => {
+      const key = String(basket.id),
+        amountValue = d.series[i].values[basket.index],
+        amountText = signed(amountValue),
+        percentText = basket.buyValue
+          ? `${amountValue >= 0 ? "+" : ""}${((amountValue / basket.buyValue) * 100).toFixed(2)}%`
+          : "—";
+      activeIds.add(key);
+      let entry = rowCache.get(key);
+      if (!entry) {
+        const row = document.createElement("div"),
+          label = document.createElement("span"),
+          value = document.createElement("div"),
+          amount = document.createElement("b"),
+          change = document.createElement("small");
+        row.className = "tooltip-row";
+        label.className = "tooltip-basket-name";
+        value.className = "tooltip-basket-value";
+        change.className = "tooltip-basket-change";
+        value.append(amount, change);
+        row.append(label, value);
+        entry = { row, label, amount, change };
+        rowCache.set(key, entry);
+      }
+      entry.label.textContent = graphBasketName(basket);
+      entry.label.style.color = basket.color;
+      entry.amount.className = amountValue >= 0 ? "green" : "red";
+      entry.amount.setAttribute("aria-label", amountText);
+      renderOdometer(entry.amount, amountText);
+      entry.change.className = `tooltip-basket-change${amountValue >= 0 ? " green" : " red"}`;
+      entry.change.setAttribute("aria-label", percentText);
+      renderOdometer(entry.change, percentText);
+      return entry.row;
+    });
+  for (const key of rowCache.keys()) if (!activeIds.has(key)) rowCache.delete(key);
+  const currentRows = rows.children;
+  if (currentRows.length !== nextRows.length || nextRows.some((row, index) => currentRows[index] !== row))
+    rows.replaceChildren(...nextRows);
+  pnlTooltipRows.set(rows, rowCache);
   const tip = $("chart-tooltip");
   setChartTooltipVisible(tip, true);
   positionTopTooltip(tip, x, rect.width);
-  setChartTooltipVisible($("nifty-tooltip"), false);
   setChartTooltipVisible($("percent-tooltip"), false);
   draw(d);
   if (window.miniChartData) drawMiniPlots(window.miniChartData);
@@ -4762,9 +5173,7 @@ function draw(d) {
   for (const t of chartTimeTicks())
     ctx.fillText(time(t), chartX(t, p, w), h - p.b + 10);
   if (window.hoverIndex != null) {
-    const i = window.hoverIndex,
-      px = X(i),
-      hoverX = chartX(window.linkedHoverTime, p, w);
+    const hoverX = chartX(window.linkedHoverTime, p, w);
     ctx.save();
     ctx.setLineDash([5, 6]);
     ctx.strokeStyle = "#a3aea7aa";
@@ -4774,8 +5183,13 @@ function draw(d) {
     ctx.stroke();
     ctx.restore();
     d.baskets.forEach((b, j) => {
+      const hoverValue = interpolateAtTime(
+        d.times,
+        d.series.map((point) => point.values[j]),
+        window.linkedHoverTime,
+      );
       ctx.beginPath();
-      ctx.arc(px, Y(d.series[i].values[j]), 4, 0, Math.PI * 2);
+      ctx.arc(hoverX, Y(hoverValue), 4, 0, Math.PI * 2);
       ctx.fillStyle = b.color;
       ctx.fill();
       ctx.strokeStyle = "#eaf3ee";

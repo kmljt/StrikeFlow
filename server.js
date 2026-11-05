@@ -12,6 +12,12 @@ let upstoxToken = fs.existsSync(tokenFile)
   : null;
 const requestToken = new AsyncLocalStorage();
 const suggestionCache = new Map();
+const timedPriceCache = new Map();
+const MARKETS = {
+  NIFTY: { name: "NIFTY 50", indexKey: "NSE_INDEX|Nifty 50", foPrefix: "NSE_FO|", lotSize: 65, step: 50 },
+  SENSEX: { name: "SENSEX", indexKey: "BSE_INDEX|SENSEX", foPrefix: "BSE_FO|", lotSize: 20, step: 100 },
+};
+function marketConfig(value) { return MARKETS[String(value || "NIFTY").toUpperCase()] || MARKETS.NIFTY; }
 
 function send(res, status, body) {
   res.writeHead(status, {
@@ -163,24 +169,24 @@ async function upstoxHistory(
   );
   return { candles: expiredData?.candles || [] };
 }
-async function resolveNiftyOption(expiry, strike, type) {
-  const contracts = await niftyContracts(expiry);
+async function resolveNiftyOption(expiry, strike, type, market = "NIFTY") {
+  const config = marketConfig(market), contracts = await niftyContracts(expiry, market);
   const found = (contracts || []).find(
     (c) => Number(c.strike_price) === strike && c.instrument_type === type,
   );
   if (!found)
     throw new Error(
-      "No NIFTY 50 option exists for that expiry, strike, and type.",
+      `No ${config.name} option exists for that expiry, strike, and type.`,
     );
   return {
     instrumentKey: found.instrument_key,
-    lotSize: 65,
+    lotSize: Number(found.lot_size) || config.lotSize,
     providerLotSize: Number(found.lot_size) || null,
   };
 }
-async function niftyContracts(expiry) {
+async function niftyContracts(expiry, market = "NIFTY") {
   const expired = expiry < todayIST();
-  const params = { instrument_key: "NSE_INDEX|Nifty 50", expiry_date: expiry };
+  const params = { instrument_key: marketConfig(market).indexKey, expiry_date: expiry };
   try {
     const currentContracts = await upstoxGet(upstoxURL("/option/contract", params));
     if (currentContracts?.length || !expired) return currentContracts || [];
@@ -214,22 +220,42 @@ async function priorClose(instrumentKey, day, expired = false, expiry) {
   );
   return candlesFor(data).at(-1) || null;
 }
+const ENTRY_TIMES = new Set(["15:20", "15:30", "15:40"]);
+function normalizeEntryTime(value) { return ENTRY_TIMES.has(value) ? value : "15:40"; }
+async function priorPriceAt(instrumentKey, day, entryTime, expired = false, expiry) {
+  const targetTime = normalizeEntryTime(entryTime), cacheKey = [instrumentKey, day, targetTime, expiry || ""].join("|");
+  const cached = timedPriceCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.value;
+  const previous = await priorClose(instrumentKey, day, expired, expiry);
+  if (!previous) return null;
+  const data = await upstoxHistory(instrumentKey, previous.date, addCalendarDays(previous.date, 1), "1minute", expired, expiry);
+  const cutoff = Date.parse(`${previous.date}T${targetTime}:00+05:30`),
+    candles = (data?.candles || []).map((c) => ({
+      timestamp: Date.parse(c[0]),
+      close: Number(c[4]),
+    })).filter((c) => Number.isFinite(c.timestamp) && Number.isFinite(c.close) && c.timestamp + 60000 <= cutoff).sort((a, b) => a.timestamp - b.timestamp),
+    selected = candles.at(-1);
+  if (!selected) throw new Error(`No option or index price was available by ${targetTime} on ${previous.date}.`);
+  const value = { date: previous.date, close: selected.close, time: targetTime };
+  timedPriceCache.set(cacheKey, { value, expires: Date.now() + 60000 });
+  return value;
+}
 function addCalendarDays(day, count) {
   const date = new Date(`${day}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + count);
   return date.toISOString().slice(0, 10);
 }
-async function suggestOptions(expiry, day, suffix, type) {
-  const key = [expiry, day, suffix, type].join("|"),
+async function suggestOptions(expiry, day, suffix, type, market = "NIFTY", entryTime = "15:40") {
+  const config = marketConfig(market), key = [market, expiry, day, suffix, type, entryTime].join("|"),
     cached = suggestionCache.get(key);
   if (cached && cached.expires > Date.now()) return cached.value;
   const [reference, contracts] = await Promise.all([
-    priorClose("NSE_INDEX|Nifty 50", day),
-    niftyContracts(expiry),
+    priorPriceAt(config.indexKey, day, entryTime),
+    niftyContracts(expiry, market),
   ]);
   if (!reference)
     throw new Error(
-      "Could not find NIFTY 50’s previous-session close for that day.",
+      `Could not find ${config.name}’s ${entryTime} entry price from the previous session.`,
     );
   const price = reference.close,
     options = contracts
@@ -255,21 +281,21 @@ async function suggestOptions(expiry, day, suffix, type) {
   suggestionCache.set(key, { value, expires: Date.now() + 120000 });
   return value;
 }
-async function smartPickOption(expiry, day, otmPoints, budget, type) {
-  const cacheKey = ["smart", expiry, day, otmPoints, budget, type].join("|");
+async function smartPickOption(expiry, day, otmPoints, budget, type, market = "NIFTY", entryTime = "15:40") {
+  const config = marketConfig(market), cacheKey = [market, "smart", expiry, day, otmPoints, budget, type, entryTime].join("|");
   const cached = suggestionCache.get(cacheKey);
   if (cached && cached.expires > Date.now()) return cached.value;
 
   const [reference, contracts] = await Promise.all([
-    priorClose("NSE_INDEX|Nifty 50", day),
-    niftyContracts(expiry),
+    priorPriceAt(config.indexKey, day, entryTime),
+    niftyContracts(expiry, market),
   ]);
   if (!reference)
     throw new Error(
-      "Could not find NIFTY 50’s previous-session close for that day.",
+      `Could not find ${config.name}’s ${entryTime} entry price from the previous session.`,
     );
 
-  const step = 50;
+  const step = config.step;
   const rawTarget =
     type === "CE"
       ? reference.close + otmPoints
@@ -294,13 +320,13 @@ async function smartPickOption(expiry, day, otmPoints, budget, type) {
   const pricedCandidates = await Promise.all(
     candidates.map(async (contract) => ({
       contract,
-      premium: await priorClose(contract.instrument_key, day, expired, expiry),
+      premium: await priorPriceAt(contract.instrument_key, day, entryTime, expired, expiry),
     })),
   );
   const choices = [];
   for (const { contract, premium } of pricedCandidates) {
     if (!premium || premium.close <= 0) continue;
-    const costPerLot = premium.close * 65;
+    const costPerLot = premium.close * (Number(contract.lot_size) || config.lotSize);
     const lots = Math.max(1, Math.round(budget / costPerLot));
     const strike = Number(contract.strike_price);
     const estimatedCost = costPerLot * lots;
@@ -308,10 +334,12 @@ async function smartPickOption(expiry, day, otmPoints, budget, type) {
       type,
       strike,
       lots,
+      lotSize: Number(contract.lot_size) || config.lotSize,
       premiumClose: premium.close,
       premiumDate: premium.date,
       underlyingClose: reference.close,
       underlyingDate: reference.date,
+      entryTime: normalizeEntryTime(entryTime),
       targetStrike,
       requestedOTM: otmPoints,
       actualOTM: Math.round(
@@ -406,15 +434,16 @@ async function routeRequest(req, res) {
     return send(res, 200, { connected: false });
   }
   if (url.pathname === "/api/upstox/nifty-expiries") {
+    const market = url.searchParams.get("market") || "NIFTY", config = marketConfig(market);
     if (!hasUpstoxToken())
       return send(res, 401, {
-        error: "Connect Upstox first to load NIFTY 50 expiries.",
+        error: `Connect Upstox first to load ${config.name} expiries.`,
       });
     try {
       const active =
         (await upstoxGet(
           upstoxURL("/option/contract", {
-            instrument_key: "NSE_INDEX|Nifty 50",
+            instrument_key: config.indexKey,
           }),
         )) || [];
       let expired = [],
@@ -424,7 +453,7 @@ async function routeRequest(req, res) {
         expired =
           (await upstoxGet(
             upstoxURL("/expired-instruments/expiries", {
-              instrument_key: "NSE_INDEX|Nifty 50",
+              instrument_key: config.indexKey,
             }),
           5000,
           )) || [];
@@ -449,21 +478,23 @@ async function routeRequest(req, res) {
     }
   }
   if (url.pathname === "/api/upstox/nifty-options") {
+    const market = url.searchParams.get("market") || "NIFTY", config = marketConfig(market);
     if (!hasUpstoxToken())
       return send(res, 401, {
-        error: "Connect Upstox first to search NIFTY 50 options.",
+        error: `Connect Upstox first to search ${config.name} options.`,
       });
     const expiry = url.searchParams.get("expiry"),
-      day = url.searchParams.get("day");
+      day = url.searchParams.get("day"),
+      entryTime = normalizeEntryTime(url.searchParams.get("entryTime"));
     if (
       !/^\d{4}-\d{2}-\d{2}$/.test(expiry || "") ||
       !/^\d{4}-\d{2}-\d{2}$/.test(day || "")
     )
-      return send(res, 400, { error: "Choose a valid NIFTY 50 expiry and trading day." });
+      return send(res, 400, { error: `Choose a valid ${config.name} expiry and trading day.` });
     try {
       const [contracts, reference] = await Promise.all([
-        niftyContracts(expiry),
-        priorClose("NSE_INDEX|Nifty 50", day),
+        niftyContracts(expiry, market),
+        priorPriceAt(config.indexKey, day, entryTime),
       ]);
       const options = contracts
         .filter(
@@ -478,20 +509,24 @@ async function routeRequest(req, res) {
         .sort((a, b) => a.strike - b.strike || a.type.localeCompare(b.type));
       return send(res, 200, {
         options,
+        lotSize: Number(contracts[0]?.lot_size) || config.lotSize,
         referenceClose: reference?.close ?? null,
         referenceDate: reference?.date ?? null,
+        entryTime,
       });
     } catch (e) {
       return send(res, 502, { error: e.message });
     }
   }
   if (url.pathname === "/api/upstox/nifty-option-quote") {
+    const market = url.searchParams.get("market") || "NIFTY", config = marketConfig(market);
     if (!hasUpstoxToken())
       return send(res, 401, {
         error: "Connect Upstox first to load option prices.",
       });
     const expiry = url.searchParams.get("expiry"),
       day = url.searchParams.get("day"),
+      entryTime = normalizeEntryTime(url.searchParams.get("entryTime")),
       type = url.searchParams.get("type"),
       strike = Number(url.searchParams.get("strike"));
     if (
@@ -502,16 +537,17 @@ async function routeRequest(req, res) {
     )
       return send(res, 400, { error: "Choose a valid NIFTY option." });
     try {
-      const contracts = await niftyContracts(expiry),
+      const contracts = await niftyContracts(expiry, market),
         contract = contracts.find((item) =>
           item.instrument_type === type &&
           Number(item.strike_price) === strike,
         );
       if (!contract)
         return send(res, 404, { error: "No listed contract matches this option." });
-      const premium = await priorClose(
+      const premium = await priorPriceAt(
         contract.instrument_key,
         day,
+        entryTime,
         expiry < todayIST(),
         expiry,
       );
@@ -540,21 +576,24 @@ async function routeRequest(req, res) {
       return send(res, 200, {
         premiumPrice: premium?.close ?? null,
         premiumDate: premium?.date ?? null,
+        entryTime,
         currentPrice,
         currentDate: currentPrice === null ? null : day,
-        lotSize: Number(contract.lot_size) || 65,
+        lotSize: Number(contract.lot_size) || config.lotSize,
       });
     } catch (error) {
       return send(res, 502, { error: error.message });
     }
   }
   if (url.pathname === "/api/upstox/nifty-suggestions") {
+    const market = url.searchParams.get("market") || "NIFTY";
     if (!hasUpstoxToken())
       return send(res, 401, {
         error: "Connect Upstox first to find option premiums.",
       });
     const expiry = url.searchParams.get("expiry"),
       day = url.searchParams.get("day"),
+      entryTime = normalizeEntryTime(url.searchParams.get("entryTime")),
       suffix = Number(url.searchParams.get("suffix")),
       type = url.searchParams.get("type");
     if (
@@ -569,18 +608,20 @@ async function routeRequest(req, res) {
         error: "Enter a valid expiry, trading day, and strike suffix.",
       });
     try {
-      return send(res, 200, await suggestOptions(expiry, day, suffix, type));
+      return send(res, 200, await suggestOptions(expiry, day, suffix, type, market, entryTime));
     } catch (e) {
       return send(res, 502, { error: e.message });
     }
   }
   if (url.pathname === "/api/upstox/nifty-smart-pick") {
+    const market = url.searchParams.get("market") || "NIFTY", config = marketConfig(market);
     if (!hasUpstoxToken())
       return send(res, 401, {
         error: "Connect Upstox first to find a budget-fit option.",
       });
     const expiry = url.searchParams.get("expiry"),
       day = url.searchParams.get("day"),
+      entryTime = normalizeEntryTime(url.searchParams.get("entryTime")),
       otmPoints = Number(url.searchParams.get("otmPoints")),
       budget = Number(url.searchParams.get("budget")),
       type = url.searchParams.get("type");
@@ -600,23 +641,25 @@ async function routeRequest(req, res) {
         error: "Enter a valid expiry, trading day, OTM distance, option type, and budget.",
       });
     try {
-      const normalizedOTM = Math.max(-10000, Math.min(10000, Math.round(otmPoints / 50) * 50));
+      const normalizedOTM = Math.max(-10000, Math.min(10000, Math.round(otmPoints / config.step) * config.step));
       return send(
         res,
         200,
-        await smartPickOption(expiry, day, normalizedOTM, budget, type),
+        await smartPickOption(expiry, day, normalizedOTM, budget, type, market, entryTime),
       );
     } catch (e) {
       return send(res, 502, { error: e.message });
     }
   }
   if (url.pathname === "/api/upstox/nifty-simple-strangle") {
+    const market = url.searchParams.get("market") || "NIFTY", config = marketConfig(market);
     if (!hasUpstoxToken())
       return send(res, 401, {
-        error: "Connect Upstox first to find NIFTY 50 option strikes.",
+        error: `Connect Upstox first to find ${config.name} option strikes.`,
       });
     const expiry = url.searchParams.get("expiry"),
       day = url.searchParams.get("day"),
+      entryTime = normalizeEntryTime(url.searchParams.get("entryTime")),
       otmPoints = Number(url.searchParams.get("otmPoints")),
       requestedCenter = url.searchParams.has("center")
         ? Number(url.searchParams.get("center"))
@@ -629,12 +672,12 @@ async function routeRequest(req, res) {
       !Number.isInteger(otmPoints) ||
       otmPoints < -10000 ||
       otmPoints > 10000 ||
-      otmPoints % 50 !== 0 ||
+      otmPoints % config.step !== 0 ||
       (requestedCenter !== null &&
         (!Number.isInteger(requestedCenter) ||
-          requestedCenter < 50 ||
+          requestedCenter < config.step ||
           requestedCenter > 100000 ||
-          requestedCenter % 50 !== 0)) ||
+          requestedCenter % config.step !== 0)) ||
       !Number.isInteger(lots) ||
       lots < 1 ||
       lots > 10000
@@ -644,24 +687,24 @@ async function routeRequest(req, res) {
       });
     try {
       const [reference, contracts] = await Promise.all([
-        priorClose("NSE_INDEX|Nifty 50", day),
-        niftyContracts(expiry),
+        priorPriceAt(config.indexKey, day, entryTime),
+        niftyContracts(expiry, market),
       ]);
       if (!reference)
-        throw new Error("Could not find NIFTY 50’s previous-session close for that day.");
-      const center = requestedCenter ?? Math.round(reference.close / 50) * 50;
+        throw new Error(`Could not find ${config.name}’s ${entryTime} entry price from the previous session.`);
+      const center = requestedCenter ?? Math.round(reference.close / config.step) * config.step;
       const expired = expiry < todayIST();
       const pickLeg = async (type) => {
         const target = Math.round(
-          (center + (type === "CE" ? otmPoints : -otmPoints)) / 50,
-        ) * 50;
+          (center + (type === "CE" ? otmPoints : -otmPoints)) / config.step,
+        ) * config.step;
         const contract = contracts.find((item) =>
           item.instrument_type === type &&
           Number(item.strike_price) === target,
         );
         if (!contract)
           throw new Error(`No ${type === "CE" ? "call" : "put"} contract is listed at ${target}.`);
-        const premium = await priorClose(contract.instrument_key, day, expired, expiry),
+        const premium = await priorPriceAt(contract.instrument_key, day, entryTime, expired, expiry),
           strike = Number(contract.strike_price),
           actualOTM = Math.round(type === "CE"
             ? strike - reference.close
@@ -674,7 +717,7 @@ async function routeRequest(req, res) {
           premiumClose: premium?.close ?? null,
           premiumDate: premium?.date ?? null,
           estimatedCost: premium?.close > 0
-            ? premium.close * (Number(contract.lot_size) || 65) * lots
+            ? premium.close * (Number(contract.lot_size) || config.lotSize) * lots
             : null,
         };
       };
@@ -686,6 +729,7 @@ async function routeRequest(req, res) {
         otmPoints,
         referenceClose: reference.close,
         referenceDate: reference.date,
+        entryTime,
         call,
         put,
         estimatedCost: call.estimatedCost === null || put.estimatedCost === null
@@ -697,9 +741,10 @@ async function routeRequest(req, res) {
     }
   }
   if (url.pathname === "/api/upstox/nifty-contract") {
+    const market = url.searchParams.get("market") || "NIFTY", config = marketConfig(market);
     if (!hasUpstoxToken())
       return send(res, 401, {
-        error: "Connect Upstox first to load NIFTY 50 option prices.",
+        error: `Connect Upstox first to load ${config.name} option prices.`,
       });
     const expiry = url.searchParams.get("expiry"),
       strike = Number(url.searchParams.get("strike")),
@@ -714,7 +759,7 @@ async function routeRequest(req, res) {
         error: "Enter a valid expiry date, strike, and CE/PE type.",
       });
     try {
-      return send(res, 200, await resolveNiftyOption(expiry, strike, type));
+      return send(res, 200, await resolveNiftyOption(expiry, strike, type, market));
     } catch (e) {
       return send(res, 502, { error: e.message });
     }
@@ -732,7 +777,7 @@ async function routeRequest(req, res) {
       expired = url.searchParams.get("expired") === "true";
     if (
       !instrumentKey ||
-      !instrumentKey.startsWith("NSE_FO|") ||
+      !["NSE_FO|", "BSE_FO|"].some((prefix) => instrumentKey.startsWith(prefix)) ||
       instrumentKey.length > 160 ||
       !/^[\w| -]+$/.test(instrumentKey) ||
       !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(from || "") ||
@@ -754,27 +799,29 @@ async function routeRequest(req, res) {
     }
   }
   if (url.pathname === "/api/upstox/nifty-index-history") {
+    const market = url.searchParams.get("market") || "NIFTY", config = marketConfig(market);
     if (!hasUpstoxToken())
       return send(res, 401, {
-        error: "Connect Upstox first to load NIFTY 50 prices.",
+        error: `Connect Upstox first to load ${config.name} prices.`,
       });
     const day = url.searchParams.get("day"),
-      interval = url.searchParams.get("interval");
+      interval = url.searchParams.get("interval"),
+      entryTime = normalizeEntryTime(url.searchParams.get("entryTime"));
     if (
       !/^\d{4}-\d{2}-\d{2}$/.test(day || "") ||
       !["1minute", "5minute", "15minute", "30minute"].includes(interval || "")
     )
-      return send(res, 400, { error: "Invalid NIFTY 50 chart request." });
+      return send(res, 400, { error: `Invalid ${config.name} chart request.` });
     try {
       const [history, previous] = await Promise.all([
         upstoxHistory(
-          "NSE_INDEX|Nifty 50",
+          config.indexKey,
           day,
           addCalendarDays(day, 1),
           interval,
           false,
         ),
-        priorClose("NSE_INDEX|Nifty 50", day),
+        priorPriceAt(config.indexKey, day, entryTime),
       ]);
       return send(res, 200, {
         ...history,
