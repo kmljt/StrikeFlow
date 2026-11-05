@@ -3146,7 +3146,12 @@
       #option-mode-tabs[hidden],#manual-option-fields[hidden],#smart-option-fields[hidden]{display:none!important}
       #option-mode-tabs button{flex:1;min-height:34px;border:1px solid transparent;border-radius:8px;background:transparent;color:#92999f;font:650 12px system-ui;cursor:pointer;transition:color .16s ease,background .16s ease,border-color .16s ease}
       #option-mode-tabs button[aria-pressed="true"]{background:color-mix(in srgb,var(--site-accent) 12%,#111214);border-color:color-mix(in srgb,var(--site-accent) 28%,#24272b);color:var(--site-accent)}
-      .option-entry-fields{display:grid;grid-template-columns:minmax(130px,.8fr) minmax(220px,1.4fr) minmax(150px,.8fr);gap:12px}
+      #option-type-tabs{grid-column:1/-1;display:flex;gap:4px;padding:4px;border:1px solid color-mix(in srgb,var(--site-accent) 36%,#292d34);border-radius:15px;background:#000}
+      #option-type-tabs button{flex:1;min-width:0;min-height:50px;padding:0 14px;border:1px solid transparent;border-radius:11px;background:transparent;color:#c2c7ce;font:650 16px/1.2 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left;cursor:pointer;transition:color .16s ease,background .16s ease,border-color .16s ease}
+      #option-type-tabs button[aria-pressed="true"]{border-color:color-mix(in srgb,var(--site-accent) 35%,transparent);background:color-mix(in srgb,var(--site-accent) 12%,#07030b);color:var(--site-accent)}
+      #option-type-tabs button:disabled{cursor:not-allowed;opacity:.48}
+      .option-entry-fields{display:grid;grid-template-columns:minmax(220px,1.4fr) minmax(150px,.8fr);gap:12px}
+      #option-type-field[hidden]{display:none!important}
       #option-dialog form .option-entry-fields>.field,
       #option-dialog form .smart-input-grid>.field{display:block;min-width:0;margin:0}
       .option-entry-fields .field label{white-space:nowrap}
@@ -3158,13 +3163,13 @@
       #option-dialog form .manual-option-side{padding:5px 8px;border:1px solid color-mix(in srgb,var(--green) 34%,transparent);border-radius:6px;background:color-mix(in srgb,var(--green) 9%,transparent);color:var(--green);font-size:9px;font-weight:750;letter-spacing:.14em}
       #option-dialog form .manual-option-preview-title{display:inline!important;margin:0!important;color:#f1f3f5;font-size:15px;font-weight:750;font-variant-numeric:tabular-nums}
       #option-dialog form .manual-option-preview-details{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:0;margin:0;width:100%;min-width:0;padding:4px 0}
-      #option-dialog form .manual-option-preview-row{display:grid!important;grid-template-columns:100px minmax(0,1fr)!important;justify-content:initial!important;align-items:center;gap:12px;width:100%;min-width:0;margin:0!important;padding:8px 0}
-      #option-dialog form .manual-option-preview-row span:first-child{color:#899198;font-size:9px;font-weight:750;letter-spacing:.12em}
+      #option-dialog form .manual-option-preview-row{display:grid!important;grid-template-columns:max-content minmax(0,1fr)!important;justify-content:initial!important;align-items:center;gap:14px;width:100%;min-width:0;margin:0!important;padding:8px 0}
+      #option-dialog form .manual-option-preview-row span:first-child{color:#899198;font-size:9px;font-weight:750;letter-spacing:.12em;white-space:nowrap}
       #option-dialog form .manual-option-preview-row span:last-child{color:#c4c9ce;font-size:12px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
       #option-dialog form .manual-option-total{display:flex!important;justify-content:space-between!important;align-items:center;gap:12px;margin:0!important;padding-top:12px;border-top:1px solid #272a2f}
       #option-dialog form .manual-option-total span{color:#ff786e;font-size:9px;font-weight:750;letter-spacing:.14em}
       #option-dialog form .manual-option-total strong{color:#ff786e;font-size:16px;font-weight:750;font-variant-numeric:tabular-nums}
-      @media(max-width:520px){#option-dialog form .manual-option-preview{padding:13px}#option-dialog form .manual-option-preview-row{grid-template-columns:78px minmax(0,1fr)!important}}
+      @media(max-width:520px){#option-dialog form .manual-option-preview{padding:13px}#option-dialog form .manual-option-preview-row{gap:10px}}
       .smart-option-fields>p{margin:0;color:#899198;font-size:12px;line-height:1.6}
       .smart-input-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
       .smart-input-grid .field label{font-size:10px;white-space:nowrap}
@@ -3393,7 +3398,7 @@
       #option-dialog form>div:last-child .button,#basket-dialog form>div:last-child .button,#strangle-form .strangle-actions .button{min-width:104px}
       #option-mode-tabs{padding:4px;border-color:#262a30;background:#050607}
       #option-mode-tabs button{min-height:39px;font-size:12px}
-      .option-entry-fields{grid-template-columns:minmax(140px,.85fr) minmax(190px,1.25fr) minmax(140px,.8fr);gap:12px}
+      .option-entry-fields{grid-template-columns:minmax(190px,1.25fr) minmax(140px,.8fr);gap:12px}
       .smart-input-grid{gap:12px}
       .smart-input-grid .field label{font-size:9px}
       .smart-result{border-radius:12px}
@@ -3607,7 +3612,7 @@
         .option-entry-fields,.smart-input-grid,.strangle-inputs{grid-template-columns:minmax(0,1fr);gap:10px}
         .option-entry-fields .field label,.smart-input-grid .field label{white-space:normal}
         #option-dialog form .manual-option-preview{padding:12px}
-        #option-dialog form .manual-option-preview-row{grid-template-columns:68px minmax(0,1fr)!important;gap:8px}
+        #option-dialog form .manual-option-preview-row{grid-template-columns:max-content minmax(0,1fr)!important;gap:10px}
         #option-dialog form .manual-option-preview-row span:last-child{font-size:11px}
         #option-dialog form .manual-option-total strong{font-size:14px}
         #option-dialog form .smart-result{grid-template-columns:minmax(0,1fr)!important;gap:12px;padding:12px}
@@ -3642,7 +3647,7 @@
         .content{padding:9px}
         .chart-wrap,.mini-chart-wrap,.percent-plot .mini-chart-wrap{height:220px}
         #option-dialog form .smart-result-row{grid-template-columns:62px minmax(0,1fr)!important}
-        #option-dialog form .manual-option-preview-row{grid-template-columns:58px minmax(0,1fr)!important}
+        #option-dialog form .manual-option-preview-row{grid-template-columns:max-content minmax(0,1fr)!important}
       }
       .picker-stepper{display:contents}
       .picker-step-button{display:none}
@@ -3828,6 +3833,28 @@
       .market-option-check{opacity:0;color:var(--site-accent);font-size:14px}
       .market-option[aria-selected="true"] .market-option-check{opacity:1}
       .market-picker>#market{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;pointer-events:none}
+      .styled-dropdown{position:relative;width:100%;min-width:0}
+      .styled-dropdown-native{position:absolute!important;width:1px!important;height:1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;clip-path:inset(50%)!important;white-space:nowrap!important;pointer-events:none!important;opacity:0!important}
+      .styled-dropdown-trigger{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-width:0;min-height:46px;padding:0 15px;border:1px solid #292d34;border-radius:12px;background:linear-gradient(180deg,#080808,#000);color:#e7e9ed;font:600 16px/1.2 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left;cursor:pointer;transition:border-color .16s ease,background .16s ease,box-shadow .16s ease}
+      .styled-dropdown-trigger:hover,.styled-dropdown.is-open .styled-dropdown-trigger{border-color:color-mix(in srgb,var(--site-accent) 48%,#292d34);background:linear-gradient(180deg,color-mix(in srgb,var(--site-accent) 7%,#080808),#000);box-shadow:0 0 0 3px color-mix(in srgb,var(--site-accent) 9%,transparent)}
+      .styled-dropdown-trigger:focus-visible{outline:2px solid var(--site-accent);outline-offset:2px}
+      .styled-dropdown-trigger:disabled{cursor:not-allowed;opacity:.55}
+      .styled-dropdown-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .styled-dropdown-trigger svg{width:16px;height:16px;flex:0 0 16px;fill:none;stroke:#aeb5be;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;transition:transform .16s ease,stroke .16s ease}
+      .styled-dropdown.is-open .styled-dropdown-trigger svg{transform:rotate(180deg);stroke:var(--site-accent)}
+      .styled-dropdown-menu{position:absolute;z-index:120;top:calc(100% + 7px);right:0;left:0;display:none;max-height:min(280px,50vh);overflow:auto;padding:5px;border:1px solid color-mix(in srgb,var(--site-accent) 30%,#272a30);border-radius:12px;background:#000;box-shadow:0 16px 38px #000d,0 0 24px color-mix(in srgb,var(--site-accent) 7%,transparent)}
+      .styled-dropdown.is-open .styled-dropdown-menu{display:grid!important;grid-template-columns:minmax(0,1fr);gap:3px}
+      .option-entry-fields .styled-dropdown.is-open .styled-dropdown-menu{position:relative;top:auto;right:auto;left:auto;margin-top:7px}
+      .styled-dropdown-option{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:42px;padding:0 11px;border:1px solid transparent;border-radius:8px;background:transparent;color:#c2c7ce;font:550 15px/1.2 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-align:left;cursor:pointer;transition:background .14s ease,border-color .14s ease,color .14s ease}
+      .styled-dropdown-option:hover,.styled-dropdown-option:focus-visible{outline:none;border-color:#272a30;background:#0b0b0b;color:#f0f1f4}
+      .styled-dropdown-option[aria-selected="true"]{border-color:color-mix(in srgb,var(--site-accent) 24%,transparent);background:color-mix(in srgb,var(--site-accent) 10%,#050505);color:var(--site-accent)}
+      .styled-dropdown-option:disabled{cursor:not-allowed;opacity:.42}
+      .styled-dropdown-check{opacity:0;color:var(--site-accent);font-size:16px;font-weight:800}
+      .styled-dropdown-option[aria-selected="true"] .styled-dropdown-check{opacity:1}
+      .styled-dropdown-compact .styled-dropdown-trigger{min-height:38px;padding:0 10px;border-radius:10px;font-size:13px}
+      .styled-dropdown-compact .styled-dropdown-option{min-height:36px;font-size:13px}
+      .styled-dropdown-compact .styled-dropdown-menu{min-width:100%}
+      .styled-dropdown.is-disabled .styled-dropdown-trigger{border-color:#23272b;background:#050505;color:#858b93;box-shadow:none}
       @media(max-width:760px){.session .market-picker{grid-column:1/-1;grid-row:1;justify-self:stretch;grid-template-columns:auto minmax(0,1fr)}.market-trigger{width:100%;min-width:0}.market-menu{right:0;left:0}}
       .session{display:flex;align-items:center;gap:12px;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}
       #upstox-status{height:28px;min-height:28px;padding:0;border:0;border-radius:0;background:transparent;color:#79cfa9;font-size:11px;font-weight:600;box-shadow:none}
@@ -4155,7 +4182,11 @@
             <button type="button" data-option-mode="smart" aria-pressed="false">Smart pick</button>
           </div>
           <div id="manual-option-fields" class="option-entry-fields">
-            <div class="field">
+            <div id="option-type-tabs" role="group" aria-label="Option type">
+              <button type="button" data-option-type="CE" aria-pressed="true">Call · CE</button>
+              <button type="button" data-option-type="PE" aria-pressed="false">Put · PE</button>
+            </div>
+            <div id="option-type-field" class="field" hidden>
               <label for="option-type-select">Option type</label>
               <select id="option-type-select" disabled>
                 <option value="CE">Call · CE</option>

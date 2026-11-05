@@ -1,6 +1,6 @@
 const UPSTOX_TOKEN_KEY = "strikeflow-upstox-token";
 const LAST_TRADING_DAY_KEY = "pnl-last-trading-day";
-const HAPTIC_CLICK_MS = 10;
+const HAPTIC_CLICK_MS = 2;
 const ENTRY_TIME_KEY = "strikeflow-entry-time";
 const DEFAULT_STRANGLE_OFFSETS = [0, 100, 200, 300, 400, 500];
 const MARKET_KEY = "strikeflow-market";
@@ -140,6 +140,136 @@ marketMenu.addEventListener("keydown", (event) => {
 document.addEventListener("pointerdown", (event) => {
   if (!marketPicker.contains(event.target)) setMarketMenuOpen(false);
 });
+let openStyledDropdown = null;
+function enhanceStyledDropdown(select) {
+  if (select.id === "market" || select.dataset.styledDropdown === "true") return;
+  select.dataset.styledDropdown = "true";
+  const wrapper = document.createElement("div"),
+    trigger = document.createElement("button");
+  wrapper.className = `styled-dropdown${select.classList.contains("contents-type-select") ? " styled-dropdown-compact" : ""}`;
+  trigger.className = "styled-dropdown-trigger";
+  trigger.type = "button";
+  trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-expanded", "false");
+  const labelElement = [...document.querySelectorAll("label[for]")].find((item) => item.htmlFor === select.id),
+    accessibleName = select.getAttribute("aria-label") || labelElement?.textContent.trim() || "Choose an option",
+    valueText = document.createElement("span"),
+    chevron = document.createElementNS("http://www.w3.org/2000/svg", "svg"),
+    path = document.createElementNS("http://www.w3.org/2000/svg", "path"),
+    menu = document.createElement("div");
+  trigger.setAttribute("aria-label", accessibleName);
+  trigger.setAttribute("aria-controls", `${select.id || `styled-select-${Math.random().toString(36).slice(2)}`}-menu`);
+  valueText.className = "styled-dropdown-value";
+  chevron.setAttribute("viewBox", "0 0 16 16");
+  chevron.setAttribute("aria-hidden", "true");
+  path.setAttribute("d", "m3.5 6 4.5 4 4.5-4");
+  chevron.append(path);
+  menu.className = "styled-dropdown-menu";
+  menu.id = trigger.getAttribute("aria-controls");
+  menu.setAttribute("role", "listbox");
+  menu.setAttribute("aria-label", accessibleName);
+  trigger.append(valueText, chevron);
+  select.parentNode.insertBefore(wrapper, select);
+  wrapper.append(select, trigger, menu);
+  select.classList.add("styled-dropdown-native");
+  select.setAttribute("aria-hidden", "true");
+  select.tabIndex = -1;
+
+  let options = [];
+  const close = (restoreFocus = false) => {
+    wrapper.classList.remove("is-open");
+    trigger.setAttribute("aria-expanded", "false");
+    if (openStyledDropdown === close) openStyledDropdown = null;
+    if (restoreFocus) trigger.focus({ preventScroll: true });
+  };
+  const refresh = () => {
+    const selected = [...select.options].find((option) => option.value === select.value) || select.options[0];
+    valueText.textContent = selected?.textContent.trim() || "Select an option";
+    trigger.disabled = select.disabled || !select.options.length;
+    wrapper.classList.toggle("is-disabled", trigger.disabled);
+    options = [...select.options].map((option, index) => {
+      const item = document.createElement("button"),
+        text = document.createElement("span"),
+        check = document.createElement("span");
+      item.className = "styled-dropdown-option";
+      item.type = "button";
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", String(option.value === select.value));
+      item.disabled = option.disabled;
+      text.textContent = option.textContent.trim();
+      check.className = "styled-dropdown-check";
+      check.setAttribute("aria-hidden", "true");
+      check.textContent = "✓";
+      item.append(text, check);
+      item.addEventListener("click", () => {
+        if (select.value !== option.value) {
+          select.value = option.value;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        close(true);
+      });
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          close(true);
+        } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+          event.preventDefault();
+          const enabled = options.filter((candidate) => !candidate.disabled),
+            current = enabled.indexOf(document.activeElement),
+            next = event.key === "Home" ? 0 : event.key === "End" ? enabled.length - 1 : current < 0 ? (event.key === "ArrowDown" ? 0 : enabled.length - 1) : (current + (event.key === "ArrowDown" ? 1 : -1) + enabled.length) % enabled.length;
+          enabled[next]?.focus();
+        }
+      });
+      item.dataset.index = String(index);
+      return item;
+    });
+    menu.replaceChildren(...options);
+  };
+  const open = (focusSelected = false) => {
+    openStyledDropdown?.();
+    if (trigger.disabled) return;
+    wrapper.classList.add("is-open");
+    trigger.setAttribute("aria-expanded", "true");
+    openStyledDropdown = close;
+    if (focusSelected) (options.find((option) => option.getAttribute("aria-selected") === "true" && !option.disabled) || options.find((option) => !option.disabled))?.focus();
+  };
+  trigger.addEventListener("click", () => wrapper.classList.contains("is-open") ? close() : open());
+  trigger.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      open(true);
+    }
+  });
+  menu.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      close(true);
+    }
+  });
+  wrapper.addEventListener("focusout", () => requestAnimationFrame(() => {
+    if (!wrapper.contains(document.activeElement)) close();
+  }));
+  if (labelElement) labelElement.addEventListener("click", (event) => {
+    event.preventDefault();
+    trigger.focus({ preventScroll: true });
+    open();
+  });
+  select.addEventListener("change", refresh);
+  new MutationObserver(refresh).observe(select, { childList: true, subtree: true, characterData: true, attributes: true });
+  refresh();
+}
+function initializeStyledDropdowns(root = document) {
+  if (root instanceof HTMLSelectElement) return enhanceStyledDropdown(root);
+  if (!root.querySelector?.("select:not(#market)")) return;
+  root.querySelectorAll("select:not(#market)").forEach(enhanceStyledDropdown);
+}
+document.addEventListener("pointerdown", (event) => {
+  if (openStyledDropdown && !event.target.closest(".styled-dropdown")) openStyledDropdown();
+});
+initializeStyledDropdowns();
+new MutationObserver((records) => records.forEach((record) => record.addedNodes.forEach((node) => {
+  if (node.nodeType === Node.ELEMENT_NODE) initializeStyledDropdowns(node);
+}))).observe(document.body, { childList: true, subtree: true });
 $("market").addEventListener("change", async () => {
   selectedMarket = $("market").value === "SENSEX" ? "SENSEX" : "NIFTY";
   localStorage.setItem(MARKET_KEY, selectedMarket);
@@ -457,11 +587,20 @@ document.querySelectorAll("[data-option-mode]").forEach((button) =>
 );
 $("smart-add").addEventListener("click", () => addSmartPosition());
 $("option-type-select").addEventListener("change", () => {
+  document.querySelectorAll("[data-option-type]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.optionType === $("option-type-select").value));
+  });
   const current = Number($("strike-input").value);
   setManualStrike(Number.isFinite(current) ? current : null);
   updateOptionDialogHeading();
   scheduleManualOptionPreview();
 });
+document.querySelectorAll("[data-option-type]").forEach((button) => button.addEventListener("click", () => {
+  const select = $("option-type-select");
+  if (select.disabled || select.value === button.dataset.optionType) return;
+  select.value = button.dataset.optionType;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+}));
 $("strike-input").addEventListener("input", () => {
   updateOptionDialogHeading();
   scheduleManualOptionPreview();
@@ -2816,6 +2955,9 @@ function openOptionDialog(id, index = null) {
   $("option-submit").textContent = position ? "Save changes" : "Add option";
   window.manualOptionSeed = position;
   $("option-type-select").value = position?.optionType || "CE";
+  document.querySelectorAll("[data-option-type]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.optionType === $("option-type-select").value));
+  });
   $("lots").value = position?.lots || "1";
   $("option-error").hidden = true;
   if (position && $("expiry").value !== position.expiry) {
@@ -3442,6 +3584,7 @@ async function loadOptionContracts() {
 }
 function setManualControlsEnabled(enabled) {
   $("option-type-select").disabled = !enabled;
+  document.querySelectorAll("[data-option-type]").forEach((button) => { button.disabled = !enabled; });
   $("strike-input").disabled = !enabled;
   syncStepButtons("strike-input");
 }
@@ -3460,6 +3603,9 @@ function configureManualOptionFields(position = null) {
       ? null
       : Math.round(referenceClose / marketInfo().step) * marketInfo().step);
   $("option-type-select").value = type;
+  document.querySelectorAll("[data-option-type]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.optionType === type));
+  });
   $("lots").value = String(position?.lots || $("lots").value || 1);
   $("lots").dispatchEvent(new Event("input", { bubbles: true }));
   setManualStrike(target);
