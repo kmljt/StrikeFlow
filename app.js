@@ -2,12 +2,19 @@ const UPSTOX_TOKEN_KEY = "strikeflow-upstox-token";
 const LAST_TRADING_DAY_KEY = "pnl-last-trading-day";
 const HAPTIC_CLICK_MS = 2;
 const ENTRY_TIME_KEY = "strikeflow-entry-time";
+const HOVER_NUMBER_FORMAT = new Intl.NumberFormat("en-IN", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 const DEFAULT_STRANGLE_OFFSETS = [0, 100, 200, 300, 400, 500];
+const CHART_RANGE_SESSION_SCALE = { "1D": 1, "5D": 5, "10D": 10, "1M": 20 };
 const MARKET_KEY = "strikeflow-market";
 let selectedMarket = localStorage.getItem(MARKET_KEY) === "SENSEX" ? "SENSEX" : "NIFTY";
 let selectedEntryTime = ["15:20", "15:30", "15:40"].includes(localStorage.getItem(ENTRY_TIME_KEY))
   ? localStorage.getItem(ENTRY_TIME_KEY)
   : "15:40";
+let selectedChartRange = "1D";
+let chartCoordinateCache = new WeakMap();
 const marketInfo = () => selectedMarket === "SENSEX"
   ? { name: "SENSEX", lotSize: Number(window.marketLotSize) || 20, step: 100, yahoo: "^BSESN" }
   : { name: "NIFTY", lotSize: Number(window.marketLotSize) || 65, step: 50, yahoo: "^NSEI" };
@@ -54,6 +61,52 @@ function isMarketClosed(day) {
   const weekday = new Date(`${day}T00:00:00Z`).getUTCDay();
   return (weekday === 0 || weekday === 6) && day !== "2026-11-08";
 }
+function getChartSessionDays(endDay, range = selectedChartRange) {
+  const count = range === "5D" ? 5 : range === "10D" ? 10 : range === "1M" ? 21 : 1,
+    days = [];
+  for (let day = endDay; days.length < count; day = addDays(day, -1))
+    if (!isMarketClosed(day)) days.unshift(day);
+  return days;
+}
+function chartReferenceDay(day, range = selectedChartRange) {
+  const sessions = getChartSessionDays(day, range);
+  return range === "1D" ? day : sessions[0] || day;
+}
+function setChartTimeline(days) {
+  chartCoordinateCache = new WeakMap();
+  window.chartSessionDays = days;
+  window.chartSessionLookup = new Map(days.map((day, index) => [day, index]));
+  window.chartCoordinateRange = { start: 0, end: Math.max(1, days.length) * 390 };
+}
+function setChartXDomain(times) {
+  const coordinates = times.filter(Number.isFinite).map(chartCoordinate);
+  if (coordinates.length) {
+    const start = Math.min(...coordinates),
+      end = Math.max(...coordinates);
+    window.chartCoordinateRange = {
+      start,
+      end: end > start ? end : start + 1,
+    };
+  }
+}
+function chartCoordinate(timestamp) {
+  const day = istDay(timestamp),
+    index = window.chartSessionLookup?.get(day) ?? 0,
+    utcMinutes = Math.floor(timestamp / 60) % 1440,
+    localMinutes = (utcMinutes + 330) % 1440,
+    offset = Math.max(0, Math.min(390, localMinutes - (9 * 60 + 15)));
+  return index * 390 + offset;
+}
+function chartTimestampAtCoordinate(coordinate) {
+  const days = window.chartSessionDays || [];
+  if (!days.length) return 0;
+  const value = Math.max(0, Math.min(days.length * 390 - 0.01, coordinate)),
+    index = Math.min(days.length - 1, Math.floor(value / 390)),
+    offset = value - index * 390,
+    localMinutes = 9 * 60 + 15 + offset,
+    utcMinutes = localMinutes - 330;
+  return epoch(days[index]) + utcMinutes * 60;
+}
 $("market").value = selectedMarket;
 $("entry-time").value = selectedEntryTime;
 function syncMarketUi() {
@@ -87,13 +140,11 @@ function syncMarketUi() {
   });
   const options = $("basket-offset-options");
   if (options) {
-    options.replaceChildren();
-    for (let offset = -200; offset <= 1000; offset += info.step) {
-      const label = document.createElement("label"), checkbox = document.createElement("input");
-      checkbox.type = "checkbox"; checkbox.name = "basket-offset-toggle"; checkbox.value = String(offset);
-      label.append(checkbox, document.createTextNode(Number(offset).toLocaleString("en-IN")));
-      options.append(label);
-    }
+    const selectedOffsets = new Set(
+      [...options.querySelectorAll('input[name="basket-offset-toggle"]:checked')]
+        .map((input) => Number(input.value)),
+    );
+    renderBulkOffsetOptions(selectedOffsets);
   }
 }
 syncMarketUi();
@@ -319,7 +370,11 @@ $("entry-time").addEventListener("change", () => {
       bulkFollowedReference &&
       nextReferenceCenter !== null &&
       nextReferenceCenter !== previousReferenceCenter
-        ? replaceBulkStranglesAtCenter(nextReferenceCenter, ++bulkCenterRequest)
+        ? replaceBulkStranglesAtCenter(
+            nextReferenceCenter,
+            ++bulkCenterRequest,
+            state.bulkContext?.autoCenter !== false,
+          )
         : null;
     if ($("strangle-dialog").open && window.strangleMode === "simple")
       scheduleSimpleStrangle();
@@ -693,6 +748,7 @@ dateField.addEventListener("change", () => {
     expiry: $("expiry").value,
     center: null,
     lots: 1,
+    autoCenter: true,
   };
   saveState();
   syncBulkCenterInput();
@@ -714,8 +770,10 @@ dateField.addEventListener("change", () => {
   $("error").classList.remove("is-info");
 });
 async function fetchSimpleStranglePick({ day, expiry, offset, lots = 1, center = null }) {
+  const referenceDay = chartReferenceDay(day);
   const params = new URLSearchParams({
     day,
+    referenceDay,
     expiry,
     otmPoints: String(offset),
     lots: String(lots),
@@ -770,6 +828,7 @@ async function addDefaultDateBaskets(day, expiry, requestId) {
       expiry,
       center: picks[0]?.center ?? null,
       lots: 1,
+      autoCenter: true,
     };
     state.bulkAdderUsed = true;
     saveState();
@@ -800,7 +859,7 @@ function resetBasketsForExpiry() {
   state.baskets = [];
   state.keepEmptyOnStart = false;
   state.bulkAdderUsed = true;
-  state.bulkContext = { day, expiry, center: null, lots: 1 };
+  state.bulkContext = { day, expiry, center: null, lots: 1, autoCenter: true };
   saveState();
   syncBulkCenterInput();
   syncBulkOffsetPickerFromBaskets();
@@ -900,8 +959,11 @@ try {
   const savedInterval = localStorage.getItem("pnl-price-interval");
   if (
     [...$("interval").options].some((option) => option.value === savedInterval)
-  )
+  ) {
     $("interval").value = savedInterval;
+    // Refresh the custom dropdown label after restoring the persisted value.
+    $("interval").dispatchEvent(new Event("change", { bubbles: true }));
+  }
 } catch {}
 $("interval").addEventListener("change", () => {
   try {
@@ -909,7 +971,91 @@ $("interval").addEventListener("change", () => {
   } catch {}
   invalidateResults();
 });
+document.querySelectorAll(".chart-range-button").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const range = button.dataset.chartRange;
+    if (!["1D", "5D", "10D", "1M"].includes(range) || range === selectedChartRange) return;
+    const previousRange = selectedChartRange,
+      previousScale = CHART_RANGE_SESSION_SCALE[previousRange],
+      nextScale = CHART_RANGE_SESSION_SCALE[range],
+      checkedOffsets = [...document.querySelectorAll('input[name="basket-offset-toggle"]:checked')]
+        .map((input) => Number(input.value)),
+      scaledOffsets = checkedOffsets.map((offset) => scaleBulkOffset(offset, previousScale, nextScale));
+    selectedChartRange = range;
+    renderBulkOffsetOptions(new Set(scaledOffsets));
+    const day = dateField.value,
+      days = getChartSessionDays(day, range),
+      rangeStart = range === "1D" ? day : days[0] || day;
+    $("dates").textContent = rangeStart === day
+      ? formatDate(day)
+      : `${formatDate(rangeStart)} – ${formatDate(day)}`;
+    document.querySelectorAll(".chart-range-button").forEach((option) => {
+      option.setAttribute("aria-pressed", String(option === button));
+    });
+    window.linkedHoverTime = null;
+    window.hoverIndex = null;
+    const hasBulkBaskets = state.baskets.some((basket) => Number.isFinite(Number(basket.bulkOffset))),
+      center = currentBulkCenter();
+    if (hasBulkBaskets && center !== null) {
+      await replaceBulkStranglesAtCenter(center, ++bulkCenterRequest, state.bulkContext?.autoCenter !== false, {
+        offsets: scaledOffsets,
+        replaceAllBulk: true,
+      });
+    }
+    scheduleRefresh();
+  });
+});
 const chartCanvas = $("chart");
+const plotBaseCache = new WeakMap();
+const indexReadoutCache = new WeakMap();
+function getIndexReadoutSeries(points) {
+  let series = indexReadoutCache.get(points);
+  if (!series) {
+    series = {
+      times: points.map((point) => point.t),
+      prices: points.map((point) => point.value),
+    };
+    indexReadoutCache.set(points, series);
+  }
+  return series;
+}
+function restorePlotBase(canvas, keys, box, ratio, ctx) {
+  const cache = plotBaseCache.get(canvas),
+    coordinateRange = window.chartCoordinateRange || { start: 0, end: 0 },
+    timeline = (window.chartSessionDays || []).join("|");
+  if (
+    !cache ||
+    cache.width !== canvas.width ||
+    cache.height !== canvas.height ||
+    cache.ratio !== ratio ||
+    cache.rangeStart !== coordinateRange.start ||
+    cache.rangeEnd !== coordinateRange.end ||
+    cache.timeline !== timeline ||
+    cache.keys.length !== keys.length ||
+    cache.keys.some((key, index) => key !== keys[index])
+  ) return false;
+  ctx.drawImage(cache.bitmap, 0, 0, box.width, box.height);
+  cache.drawOverlay();
+  return true;
+}
+function savePlotBase(canvas, keys, box, ratio, drawOverlay) {
+  const bitmap = document.createElement("canvas");
+  bitmap.width = canvas.width;
+  bitmap.height = canvas.height;
+  bitmap.getContext("2d").drawImage(canvas, 0, 0);
+  const coordinateRange = window.chartCoordinateRange || { start: 0, end: 0 };
+  plotBaseCache.set(canvas, {
+    keys,
+    width: canvas.width,
+    height: canvas.height,
+    ratio,
+    rangeStart: coordinateRange.start,
+    rangeEnd: coordinateRange.end,
+    timeline: (window.chartSessionDays || []).join("|"),
+    bitmap,
+    drawOverlay,
+  });
+}
 const pnlTooltipRows = new WeakMap();
 const percentTooltipRows = new WeakMap();
 const odometerCells = new WeakMap(),
@@ -945,6 +1091,8 @@ function renderOdometer(element, value) {
   const text = String(value),
     cells = odometerCells.get(element) || new Map(),
     parts = [];
+  if (element.dataset.odometerText === text) return;
+  element.dataset.odometerText = text;
   for (let index = 0; index < text.length; index++) {
     const char = text[index],
       position = text.length - index - 1,
@@ -993,7 +1141,11 @@ function renderOdometer(element, value) {
         node.setAttribute("aria-hidden", "true");
         cell = { kind: "static", element: node };
       }
+      cell.element.classList.toggle("odometer-sign", char === "+");
       cell.element.classList.toggle("odometer-currency", char === "₹");
+      cell.element.classList.toggle("odometer-decimal", char === ".");
+      cell.element.classList.toggle("odometer-comma", char === ",");
+      cell.element.classList.toggle("odometer-percent", char === "%");
       cell.element.textContent = char;
       parts.push(cell.element);
       cells.set(position, cell);
@@ -1006,17 +1158,13 @@ function renderOdometer(element, value) {
 }
 function updateIndexQuote(points, targetTime = null) {
   if (!points?.length) return;
-  const times = points.map((point) => point.t),
-    values = points.map((point) => point.value),
+  const { times, prices: values } = getIndexReadoutSeries(points),
     timestamp = Number.isFinite(targetTime) ? targetTime : times.at(-1),
-    price = interpolateAtTime(times, values, timestamp),
+    price = interpolateAtChartTime(times, values, timestamp),
     previousClose = Number(points.previousClose) || values[0],
     change = price - previousClose,
     changePercent = previousClose ? (change / previousClose) * 100 : 0,
-    money = (amount) => Math.abs(amount).toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+    money = (amount) => HOVER_NUMBER_FORMAT.format(Math.abs(amount));
   renderOdometer($("index-quote-price"), `₹${money(price)}`);
   renderOdometer(
     $("index-quote-change"),
@@ -1024,11 +1172,13 @@ function updateIndexQuote(points, targetTime = null) {
   );
   $("index-quote-change").classList.toggle("green", change >= 0);
   $("index-quote-change").classList.toggle("red", change < 0);
-  $("index-quote-time").textContent = time(timestamp);
+  const timeLabel = chartHoverLabel(timestamp);
+  if ($("index-quote-time").textContent !== timeLabel)
+    $("index-quote-time").textContent = timeLabel;
   clearTimeout(window.indexQuoteAnnouncementTimer);
   window.indexQuoteAnnouncementTimer = setTimeout(() => {
     $("index-quote-announcement").textContent =
-      `${marketInfo().name} ${price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, ${change >= 0 ? "up" : "down"} ${money(change)} rupees, ${Math.abs(changePercent).toFixed(2)} percent from previous close at ${time(timestamp)}.`;
+      `${marketInfo().name} ${HOVER_NUMBER_FORMAT.format(price)}, ${change >= 0 ? "up" : "down"} ${money(change)} rupees, ${Math.abs(changePercent).toFixed(2)} percent from previous close at ${time(timestamp)}.`;
   }, 300);
 }
 function scheduleHoverOnFrame(canvas, showHover) {
@@ -1445,7 +1595,14 @@ function renderBaskets(options = {}) {
     pnlLabel.style.cssText = "font-size:11px;color:#89958e;margin-left:8px";
     const pnl = document.createElement("strong");
     pnl.style.cssText = "font-size:14px;white-space:nowrap";
-    pnl.textContent = valid ? signed(result.ending) : "—";
+    const pnlText = valid ? signed(result.ending) : "—";
+    pnl.replaceChildren(...[...pnlText].map((char) => {
+      if (!["+", "₹", ".", ","].includes(char)) return document.createTextNode(char);
+      const glyph = document.createElement("span");
+      glyph.className = "basket-head-raised-glyph";
+      glyph.textContent = char;
+      return glyph;
+    }));
     if (valid && result.ending !== 0)
       pnl.classList.add(result.ending > 0 ? "green" : "red");
     const callLegs = b.items.filter((item) => item.optionType === "CE"),
@@ -2113,9 +2270,38 @@ function syncBulkOffsetPickerFromBaskets() {
     input.checked = basketOffsets.has(Number(input.value));
   });
 }
+function bulkOffsetConfig(range = selectedChartRange) {
+  const scale = CHART_RANGE_SESSION_SCALE[range] || 1,
+    step = marketInfo().step * scale;
+  return { min: -4 * step, max: 20 * step, step, scale };
+}
+function scaleBulkOffset(offset, fromScale, toScale) {
+  const step = marketInfo().step * toScale,
+    min = -4 * step,
+    max = 20 * step;
+  const scaled = Math.round((offset * toScale / fromScale) / step) * step;
+  return Math.max(min, Math.min(max, scaled));
+}
+function renderBulkOffsetOptions(selectedOffsets = new Set()) {
+  const options = $("basket-offset-options");
+  if (!options) return;
+  const { min, max, step } = bulkOffsetConfig();
+  options.replaceChildren();
+  for (let offset = min; offset <= max; offset += step) {
+    const label = document.createElement("label"), checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.name = "basket-offset-toggle";
+    checkbox.value = String(offset);
+    checkbox.checked = selectedOffsets.has(offset);
+    label.append(checkbox, document.createTextNode(offset.toLocaleString("en-IN")));
+    options.append(label);
+  }
+}
 function selectDefaultStrangleOffsets() {
+  const { scale, step } = bulkOffsetConfig(),
+    defaults = new Set(DEFAULT_STRANGLE_OFFSETS.map((offset) => Math.round(offset * scale / step) * step));
   document.querySelectorAll('input[name="basket-offset-toggle"]').forEach((input) => {
-    input.checked = DEFAULT_STRANGLE_OFFSETS.includes(Number(input.value));
+    input.checked = defaults.has(Number(input.value));
   });
 }
 function currentBulkCenter() {
@@ -2148,7 +2334,7 @@ function syncBulkReferenceClose() {
     reference !== null &&
     reference !== "" &&
     Number.isFinite(Number(reference))
-      ? `Entry reference · ${selectedEntryTime} · ${formatSmartMoney(Number(reference))}`
+      ? `Entry reference · ${selectedEntryTime} · ${formatSmartMoney(Number(reference))}${window.niftyReferenceDate ? ` · ${formatSmartDate(window.niftyReferenceDate)}` : ""}`
       : "Entry reference unavailable";
 }
 function setBulkOffsetInputsDisabled(disabled) {
@@ -2206,19 +2392,35 @@ function scheduleBulkCenterUpdate() {
     replaceBulkStranglesAtCenter(center, requestId);
   }, 350);
 }
-async function replaceBulkStranglesAtCenter(center, requestId) {
+async function replaceBulkStranglesAtCenter(center, requestId, autoCenter = false, options = {}) {
   const day = dateField.value,
     context = state.bulkContext || {},
     expiry = context.day === day ? context.expiry : $("expiry").value,
     lots = context.day === day ? Number(context.lots) || 1 : 1,
-    offsets = [...document.querySelectorAll('input[name="basket-offset-toggle"]:checked')]
-      .map((input) => Number(input.value))
+    offsets = (options.offsets || [...document.querySelectorAll('input[name="basket-offset-toggle"]:checked')]
+      .map((input) => Number(input.value)))
       .sort((a, b) => a - b),
     input = $("bulk-strangle-center"),
     status = $("bulk-center-status");
   input.value = String(center);
-  if (!offsets.length || currentBulkCenter() === center) {
-    state.bulkContext = { day, expiry, center, lots };
+  if (!offsets.length && options.replaceAllBulk) {
+    const removed = state.baskets.filter((basket) => Number.isFinite(Number(basket.bulkOffset))),
+      removedIds = new Set(removed.map((basket) => basket.id));
+    removed.forEach((basket) => delete window.basketPnlResults[basket.id]);
+    if (removedIds.has(window.activeScenarioBasketId)) window.activeScenarioBasketId = null;
+    state.baskets = state.baskets.filter((basket) => !removedIds.has(basket.id));
+    state.bulkContext = { day, expiry, center, lots, autoCenter };
+    saveState();
+    syncBulkCenterInput();
+    syncBulkOffsetPickerFromBaskets();
+    renderBaskets({ onlyBasketIds: [...removedIds] });
+    scheduleRefresh({ renderBasketCards: false });
+    status.textContent = "";
+    setBulkOffsetInputsDisabled(false);
+    return;
+  }
+  if ((!offsets.length && !options.replaceAllBulk) || (!options.replaceAllBulk && currentBulkCenter() === center)) {
+    state.bulkContext = { day, expiry, center, lots, autoCenter };
     saveState();
     status.textContent = "";
     setBulkOffsetInputsDisabled(false);
@@ -2248,7 +2450,9 @@ async function replaceBulkStranglesAtCenter(center, requestId) {
     if (requestId !== bulkCenterRequest || dateField.value !== day) return;
     if (picks.some((pick) => Number(pick.center) !== center))
       throw Error(`The selected ${marketInfo().name} center was not applied.`);
-    const oldBaskets = state.baskets.filter((basket) => offsets.includes(Number(basket.bulkOffset))),
+    const oldBaskets = state.baskets.filter((basket) => options.replaceAllBulk
+        ? Number.isFinite(Number(basket.bulkOffset))
+        : offsets.includes(Number(basket.bulkOffset))),
       oldIds = oldBaskets.map((basket) => basket.id),
       oldIdSet = new Set(oldIds),
       firstBasketNumber = nextBasketNumber(),
@@ -2275,7 +2479,7 @@ async function replaceBulkStranglesAtCenter(center, requestId) {
     if (oldIdSet.has(window.activeScenarioBasketId)) window.activeScenarioBasketId = null;
     state.baskets = state.baskets.filter((basket) => !oldIdSet.has(basket.id));
     state.baskets.push(...newBaskets);
-    state.bulkContext = { day, expiry, center, lots };
+    state.bulkContext = { day, expiry, center, lots, autoCenter };
     saveState();
     syncBulkCenterInput();
     syncBulkOffsetPickerFromBaskets();
@@ -2315,7 +2519,7 @@ async function toggleBulkBasketOffset(input) {
     request = {
       day: dateField.value,
       expiry: context.day === dateField.value ? context.expiry : $("expiry").value,
-      center: context.day === dateField.value
+      center: context.day === dateField.value && context.autoCenter !== true
         ? context.center
         : Number.isFinite(cachedReference)
           ? Math.round(cachedReference / marketInfo().step) * marketInfo().step
@@ -2355,6 +2559,7 @@ async function toggleBulkBasketOffset(input) {
       expiry: pick.expiry,
       center: pick.center,
       lots: request.lots,
+      autoCenter: context.autoCenter !== false,
     };
     saveState();
     syncBulkCenterInput();
@@ -2740,6 +2945,7 @@ function addSimpleStrangle() {
     expiry: pick.expiry,
     center: pick.center,
     lots: Number(pick.call.lots),
+    autoCenter: false,
   };
   saveState();
   syncBulkCenterInput();
@@ -3549,6 +3755,7 @@ function renderExpiries() {
 async function loadOptionContracts() {
   const expiry = $("expiry").value,
     day = dateField.value,
+    referenceDay = chartReferenceDay(day),
     requestId = ++optionContractsRequest;
   window.expiryOptions = [];
   setManualControlsEnabled(false);
@@ -3557,10 +3764,16 @@ async function loadOptionContracts() {
   }
   try {
     const r = await fetch(
-        `/api/upstox/nifty-options?${new URLSearchParams({ expiry, day, entryTime: selectedEntryTime })}`,
+        `/api/upstox/nifty-options?${new URLSearchParams({
+          expiry,
+          day,
+          referenceDay,
+          entryTime: selectedEntryTime,
+        })}`,
       ),
       j = await r.json();
     if (requestId !== optionContractsRequest) return;
+    if (referenceDay !== chartReferenceDay(day)) return loadOptionContracts();
     if (!r.ok) throw Error(j.error || "Could not load options.");
     window.expiryOptions = j.options || [];
     window.marketLotSize = Number(j.lotSize) || null;
@@ -3792,8 +4005,35 @@ async function upstoxHistory(
   if (!r.ok) throw Error(j.error || "Could not load option history.");
   return j;
 }
-async function loadNiftyIndex(day, interval) {
-  const q = new URLSearchParams({ day, interval, entryTime: selectedEntryTime }),
+async function fetchYahooIndexDay(day, interval) {
+  try {
+    const yahooInterval = {
+        "1minute": "1m",
+        "5minute": "5m",
+        "15minute": "15m",
+        "30minute": "30m",
+      }[interval],
+      q = new URLSearchParams({
+        symbol: marketInfo().yahoo,
+        period1: String(epoch(day)),
+        period2: String(epoch(addDays(day, 1))),
+        interval: yahooInterval,
+      }),
+      response = await fetch(`/api/chart?${q}`),
+      result = await response.json(),
+      chart = result.chart?.result?.[0],
+      timestamps = chart?.timestamp || [],
+      closes = chart?.indicators?.quote?.[0]?.close || [];
+    return timestamps
+      .map((t, index) => ({ t, value: Number(closes[index]) }))
+      .filter((point) => istDay(point.t) === day && Number.isFinite(point.value))
+      .sort((a, b) => a.t - b.t);
+  } catch {
+    return [];
+  }
+}
+async function loadNiftyIndex(day, interval, from = day) {
+  const q = new URLSearchParams({ day, from, to: day, interval, entryTime: selectedEntryTime }),
     r = await fetch(`/api/upstox/nifty-index-history?${q}`),
     j = await r.json();
   if (!r.ok) throw Error(j.error || `Could not load ${marketInfo().name} prices.`);
@@ -3802,36 +4042,50 @@ async function loadNiftyIndex(day, interval) {
       t: Math.floor(new Date(c[0]).getTime() / 1000),
       value: Number(c[4]),
     }))
-    .filter((p) => istDay(p.t) === day && Number.isFinite(p.value))
+    .filter((p) => istDay(p.t) >= from && istDay(p.t) <= day && Number.isFinite(p.value))
     .sort((a, b) => a.t - b.t);
-  if (!points.length) {
-    const yahooInterval = {
-        "1minute": "1m",
-        "5minute": "5m",
-        "15minute": "15m",
-        "30minute": "30m",
-      }[interval],
-      yq = new URLSearchParams({
-        symbol: marketInfo().yahoo,
-        period1: String(epoch(day)),
-        period2: String(epoch(addDays(day, 1))),
-        interval: yahooInterval,
-      }),
-      yr = await fetch(`/api/chart?${yq}`),
-      yj = await yr.json(),
-      result = yj.chart?.result?.[0],
-      timestamps = result?.timestamp || [],
-      closes = result?.indicators?.quote?.[0]?.close || [];
-    points = timestamps
-      .map((t, i) => ({ t, value: Number(closes[i]) }))
-      .filter((p) => istDay(p.t) === day && Number.isFinite(p.value))
-      .sort((a, b) => a.t - b.t);
+  if (!points.length && from === day) {
+    points = await fetchYahooIndexDay(day, interval);
+  }
+  if (from !== day) {
+    // Provider range responses can omit a complete recent session; backfill each gap.
+    const presentDays = new Set(points.map((point) => istDay(point.t))),
+      missingDays = getChartSessionDays(day).filter(
+        (sessionDay) => sessionDay >= from && !presentDays.has(sessionDay),
+      );
+    for (let index = 0; index < missingDays.length; index += 3) {
+      const recovered = await Promise.all(missingDays.slice(index, index + 3).map(async (sessionDay) => {
+        try {
+          const query = new URLSearchParams({
+              day: sessionDay,
+              from: sessionDay,
+              to: sessionDay,
+              interval,
+            }),
+            response = await fetch(`/api/upstox/nifty-index-history?${query}`),
+            result = await response.json();
+          if (!response.ok) return fetchYahooIndexDay(sessionDay, interval);
+          const candles = (result.candles || [])
+            .map((candle) => ({
+              t: Math.floor(new Date(candle[0]).getTime() / 1000),
+              value: Number(candle[4]),
+            }))
+            .filter((point) => istDay(point.t) === sessionDay && Number.isFinite(point.value));
+          return candles.length ? candles : fetchYahooIndexDay(sessionDay, interval);
+        } catch {
+          return fetchYahooIndexDay(sessionDay, interval);
+        }
+      }));
+      points.push(...recovered.flat());
+    }
+    points.sort((a, b) => a.t - b.t);
   }
   if (!points.length)
     throw Error(
       `No ${interval.replace("minute", "-minute ")}prices were returned for ${marketInfo().name}.`,
     );
   points.previousClose = Number(j.previousClose) || points[0].value;
+  points.previousCloseDate = j.previousCloseDate || null;
   return points;
 }
 async function resolveNiftyOption(expiry, strike, type) {
@@ -3844,14 +4098,14 @@ async function resolveNiftyOption(expiry, strike, type) {
 function entryCutoffTimestamp(day, entryTime = selectedEntryTime) {
   return Math.floor(Date.parse(`${day}T${entryTime}:00+05:30`) / 1000);
 }
-async function calculatePosition(p, day, interval) {
+async function calculatePosition(p, day, interval, from = day) {
   const contract = await resolveNiftyOption(p.expiry, p.strike, p.optionType),
     expired = p.expiry < todayLocal,
     multiplier = p.lots * (Number(contract.lotSize) || marketInfo().lotSize),
     [intra, daily] = await Promise.all([
       upstoxHistory(
         contract.instrumentKey,
-        day,
+        from,
         addDays(day, 1),
         interval,
         expired,
@@ -3859,7 +4113,7 @@ async function calculatePosition(p, day, interval) {
       ),
       upstoxHistory(
         contract.instrumentKey,
-        addDays(day, -14),
+        addDays(from, -14),
         addDays(day, 1),
         "day",
         expired,
@@ -3875,26 +4129,31 @@ async function calculatePosition(p, day, interval) {
       }))
       .filter((x) => Number.isFinite(x.t) && Number.isFinite(x.close))
       .sort((a, b) => a.t - b.t),
-    prior = dailyCandles.filter((x) => istDay(x.t) < day);
-  if (!prior.length)
-    throw Error(`${positionName(p)} has no previous trading-session close.`);
-  const priorClose = prior.at(-1),
-    buyDate = istDay(priorClose.t),
+    prior = dailyCandles.filter((x) => istDay(x.t) < from),
     candles = (intra.candles || [])
       .map((c) => ({
         t: Math.floor(new Date(c[0]).getTime() / 1000),
         close: Number(c[4]),
       }))
-      .filter((x) => istDay(x.t) === day && Number.isFinite(x.close))
-      .sort((a, b) => a.t - b.t);
-  const entryHistory = await upstoxHistory(
-      contract.instrumentKey,
-      buyDate,
-      addDays(buyDate, 1),
-      "1minute",
-      expired,
-      p.expiry,
-    ),
+      .filter((x) => istDay(x.t) >= from && istDay(x.t) <= day && Number.isFinite(x.close))
+      .sort((a, b) => a.t - b.t),
+    firstAvailableRangePrice = candles[0] || dailyCandles.find((x) =>
+      istDay(x.t) >= from && istDay(x.t) <= day,
+    );
+  if (!prior.length && !firstAvailableRangePrice)
+    throw Error(`${positionName(p)} has no prices in the selected date range.`);
+  const priorClose = prior.at(-1),
+    buyDate = priorClose ? istDay(priorClose.t) : istDay(firstAvailableRangePrice.t),
+    entryHistory = priorClose
+      ? await upstoxHistory(
+          contract.instrumentKey,
+          buyDate,
+          addDays(buyDate, 1),
+          "1minute",
+          expired,
+          p.expiry,
+        )
+      : { candles: [] },
     entryCutoff = entryCutoffTimestamp(buyDate),
     entryCandles = (entryHistory.candles || [])
       .map((c) => ({
@@ -3903,7 +4162,7 @@ async function calculatePosition(p, day, interval) {
       }))
       .filter((c) => istDay(c.t) === buyDate && c.t + 60 <= entryCutoff && Number.isFinite(c.close))
       .sort((a, b) => a.t - b.t),
-    entry = entryCandles.at(-1);
+    entry = entryCandles.at(-1) || (!priorClose ? firstAvailableRangePrice : null);
   if (!entry)
     throw Error(`No ${positionName(p)} price was available by ${selectedEntryTime} on ${formatDate(buyDate)}.`);
   const buy = entry.close;
@@ -3923,8 +4182,9 @@ async function calculatePosition(p, day, interval) {
     name: positionName(p),
     buy,
     buyDate,
-    buyTime: selectedEntryTime,
+    buyTime: priorClose ? selectedEntryTime : time(entry.t),
     missingIntradayData,
+    missingPriorClose: !priorClose,
     close,
     multiplier,
     ending,
@@ -4133,6 +4393,8 @@ async function loadTrade(
   renderBasketCards = true,
 ) {
   const day = dateField.value,
+    sessionDays = getChartSessionDays(day),
+    rangeStart = selectedChartRange === "1D" ? day : sessionDays[0] || day,
     statBaskets = state.baskets.filter(
       (b) => b.enabled !== false && b.items.some((p) => p.enabled !== false),
     ),
@@ -4147,6 +4409,9 @@ async function loadTrade(
     renderRefreshedBaskets(renderBasketCards);
     return;
   }
+  $("dates").textContent = rangeStart === day
+    ? formatDate(day)
+    : `${formatDate(rangeStart)} – ${formatDate(day)}`;
   if (!statBaskets.length) {
     await loadNiftyOnly(
       day,
@@ -4156,6 +4421,7 @@ async function loadTrade(
     );
     return;
   }
+  setChartTimeline(sessionDays);
   $("pnl-plot").hidden = false;
   $("percent-plot").hidden = false;
   if (
@@ -4178,10 +4444,43 @@ async function loadTrade(
   setChartTooltipVisible($("chart-tooltip"), false);
   try {
     const interval = $("interval").value,
-      indexPromise = loadNiftyIndex(day, interval)
+      indexPromise = loadNiftyIndex(day, interval, rangeStart)
         .then((points) => ({ points }))
-        .catch((error) => ({ error: error.message })),
-      basketResults = await Promise.all(
+        .catch((error) => ({ error: error.message }));
+    const indexResult = await indexPromise;
+    if (generation !== requestGeneration) return;
+    if (indexResult.points?.previousClose) {
+      window.niftyReferenceClose = indexResult.points.previousClose;
+      window.niftyReferenceCloseDay = day;
+      window.niftyReferenceDate = indexResult.points.previousCloseDate || null;
+      syncBulkReferenceClose();
+      const bulkContext = state.bulkContext || {},
+        hasBulkBaskets = state.baskets.some((basket) => Number.isFinite(Number(basket.bulkOffset))),
+        rangeCenter = Math.round(indexResult.points.previousClose / marketInfo().step) * marketInfo().step;
+      if (
+        hasBulkBaskets &&
+        bulkContext.day === day &&
+        bulkContext.autoCenter !== false &&
+        Number(bulkContext.center) !== rangeCenter
+      ) {
+        await replaceBulkStranglesAtCenter(rangeCenter, ++bulkCenterRequest, true);
+        if (generation !== requestGeneration) return;
+      }
+    }
+    if (indexResult.points?.length) {
+      $("nifty-empty").hidden = true;
+      updateIndexQuote(indexResult.points, window.linkedHoverTime);
+      drawNiftyPlot(
+        $("nifty-chart"),
+        indexResult.points,
+        indexResult.points.previousClose,
+      );
+    } else {
+      $("nifty-empty").textContent = indexResult.error || `${marketInfo().name} prices unavailable`;
+      $("nifty-empty").hidden = false;
+      $("nifty-chart").getContext("2d").clearRect(0, 0, $("nifty-chart").width, $("nifty-chart").height);
+    }
+    const basketResults = await Promise.all(
         statBaskets.map(async (b) => {
           try {
             const selected = b.items
@@ -4189,7 +4488,7 @@ async function loadTrade(
                 .filter((x) => x.position.enabled !== false),
               positions = await Promise.all(
                 selected.map(async (x) => ({
-                  ...(await calculatePosition(x.position, day, interval)),
+                  ...(await calculatePosition(x.position, day, interval, rangeStart)),
                   index: x.index,
                 })),
               ),
@@ -4229,22 +4528,25 @@ async function loadTrade(
       ),
       unavailableBaskets = basketResults.filter((result) => result.error);
     if (generation !== requestGeneration) return;
-    const indexResult = await indexPromise;
-    if (generation !== requestGeneration) return;
     const heldAtEntryFallback = data.some((basket) =>
       basket.positions.some((position) => position.missingIntradayData),
-    );
+    ),
+      missingPriorCloseFallback = data.some((basket) =>
+        basket.positions.some((position) => position.missingPriorClose),
+      );
     if (unavailableBaskets.length) {
       const names = unavailableBaskets
         .map((result) => basketDisplayName(result.basket))
         .join(", ");
       showError(
-        `${names} could not be priced at ${interval.replace("minute", "-minute ")}resolution and were left out of the P&L charts. ${unavailableBaskets[0].error.message}${heldAtEntryFallback ? " Options with no intraday candles are held at their entry price." : ""}`,
+        `${names} could not be priced at ${interval.replace("minute", "-minute ")}resolution and were left out of the P&L charts. ${unavailableBaskets[0].error.message}${heldAtEntryFallback ? " Options with no intraday candles are held at their entry price." : ""}${missingPriorCloseFallback ? " Options without an earlier close use their first available price in the selected range." : ""}`,
       );
-    } else if (heldAtEntryFallback) {
+    } else if (heldAtEntryFallback || missingPriorCloseFallback) {
       const notes = [];
       if (heldAtEntryFallback)
         notes.push("Options with no intraday candles are held at their entry price for the chart.");
+      if (missingPriorCloseFallback)
+        notes.push("Options without an earlier close use their first available price in the selected range as the P&L baseline.");
       showError(notes.join(" "));
       $("error").classList.add("is-info");
     }
@@ -4304,8 +4606,11 @@ async function loadTrade(
           ? { start: times[0], end: times.at(-1) }
           : { start: 0, end: 0 };
       window.chartXRange = xRange;
+      setChartXDomain(times);
       $("title").textContent = "Options P&L";
-      $("dates").textContent = formatDate(day);
+      $("dates").textContent = rangeStart === day
+        ? formatDate(day)
+        : `${formatDate(rangeStart)} – ${formatDate(day)}`;
       $("output").classList.remove("loading");
       $("output").setAttribute("aria-busy", "false");
       window.chartData = null;
@@ -4353,8 +4658,11 @@ async function loadTrade(
       ],
       xRange = { start: Math.min(...allTimes), end: Math.max(...allTimes) };
     window.chartXRange = xRange;
+    setChartXDomain(allTimes);
     $("title").textContent = "Options P&L";
-    $("dates").textContent = formatDate(day);
+    $("dates").textContent = rangeStart === day
+      ? formatDate(day)
+      : `${formatDate(rangeStart)} – ${formatDate(day)}`;
     $("output").classList.remove("loading");
     $("output").setAttribute("aria-busy", "false");
     window.chartData = { times, series, baskets: compared, xRange };
@@ -4379,6 +4687,12 @@ async function loadNiftyOnly(
   generation,
   renderBasketCards = true,
 ) {
+  const sessionDays = getChartSessionDays(day),
+    rangeStart = selectedChartRange === "1D" ? day : sessionDays[0] || day;
+  $("dates").textContent = rangeStart === day
+    ? formatDate(day)
+    : `${formatDate(rangeStart)} – ${formatDate(day)}`;
+  setChartTimeline(sessionDays);
   $("pnl-plot").hidden = true;
   $("percent-plot").hidden = true;
   $("error").hidden = true;
@@ -4397,18 +4711,31 @@ async function loadNiftyOnly(
   window.basketPnlResults = {};
   renderRefreshedBaskets(renderBasketCards);
   try {
-    const index = await loadNiftyIndex(day, interval).then(
+    const index = await loadNiftyIndex(day, interval, rangeStart).then(
       (points) => ({ points }),
       (error) => ({ error: error.message }),
     );
     if (generation !== requestGeneration) return;
+    if (index.points?.previousClose) {
+      window.niftyReferenceClose = index.points.previousClose;
+      window.niftyReferenceCloseDay = day;
+      window.niftyReferenceDate = index.points.previousCloseDate || null;
+      const context = state.bulkContext || {};
+      if (context.day === day && context.autoCenter !== false)
+        context.center = null;
+      syncBulkReferenceClose();
+      syncBulkCenterInput();
+    }
     const times = (index.points || []).map((point) => point.t),
       xRange = times.length
         ? { start: times[0], end: times.at(-1) }
         : { start: 0, end: 0 };
     window.chartXRange = xRange;
+    setChartXDomain(times);
     $("title").textContent = "Options P&L";
-    $("dates").textContent = formatDate(day);
+    $("dates").textContent = rangeStart === day
+      ? formatDate(day)
+      : `${formatDate(rangeStart)} – ${formatDate(day)}`;
     $("output").classList.remove("loading");
     $("output").setAttribute("aria-busy", "false");
     window.miniChartData = {
@@ -4652,21 +4979,8 @@ function drawScenarioChart(
     const point = hoverPoint,
       x = Xspot(point.spot),
       y = Y(point.pnl);
-    ctx.save();
-    ctx.setLineDash([4, 5]);
-    ctx.strokeStyle = "#a3aea7aa";
-    ctx.beginPath();
-    ctx.moveTo(x, p.t);
-    ctx.lineTo(x, h - p.b);
-    ctx.stroke();
-    ctx.restore();
-    ctx.beginPath();
-    ctx.arc(x, y, 4, 0, Math.PI * 2);
-    ctx.fillStyle = point.pnl >= 0 ? color : darkerColor(color);
-    ctx.fill();
-    ctx.strokeStyle = "#f1f4f6";
-    ctx.lineWidth = 1.3;
-    ctx.stroke();
+    drawHoverCrosshair(ctx, x, p.t, h - p.b);
+    drawHoverMarker(ctx, x, y, point.pnl >= 0 ? color : darkerColor(color));
   }
 }
 function positionTopTooltip(tooltip, x, width, gap = 12) {
@@ -4754,25 +5068,57 @@ function interpolateAtTime(times, values, target) {
     progress = duration > 0 ? (target - times[left]) / duration : 0;
   return values[left] + (values[right] - values[left]) * progress;
 }
+function interpolateAtChartTime(times, values, target) {
+  let coordinates = chartCoordinateCache.get(times);
+  if (!coordinates) {
+    coordinates = times.map(chartCoordinate);
+    chartCoordinateCache.set(times, coordinates);
+  }
+  return interpolateAtTime(coordinates, values, chartCoordinate(target));
+}
 function chartTimeTicks() {
-  const { start, end } = window.chartXRange || {};
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
-    return [];
-  const span = end - start,
-    target = span / 5,
-    steps = [1800, 2700, 3600, 4500, 5400, 7200, 10800],
-    step = steps.reduce(
-      (best, x) => (Math.abs(x - target) < Math.abs(best - target) ? x : best),
-      steps[0],
-    ),
+  const days = window.chartSessionDays || [];
+  if (days.length <= 1) {
+    const range = window.chartCoordinateRange || { start: 0, end: 390 },
+      span = range.end - range.start,
+      steps = [15, 30, 45, 60, 90, 120],
+      target = span / 5,
+      step = steps.reduce((best, value) =>
+        Math.abs(value - target) < Math.abs(best - target) ? value : best,
+      steps[0]),
+      first = Math.ceil((range.start - step / 2) / step) * step + step / 2,
+      ticks = [];
+    for (let coordinate = first; coordinate <= range.end; coordinate += step)
+      ticks.push(chartTimestampAtCoordinate(coordinate));
+    return ticks;
+  }
+  const stride = days.length <= 5 ? 1 : days.length <= 10 ? 2 : 4,
     ticks = [];
-  for (let t = start; t <= end; t += step) ticks.push(t);
+  for (let i = 0; i < days.length; i += stride)
+    ticks.push(chartTimestampAtCoordinate(i * 390 + 195));
   return ticks;
 }
 function chartX(t, p, w) {
-  const r = window.chartXRange;
+  const r = window.chartCoordinateRange;
   if (!r || r.end <= r.start) return p.l;
-  return p.l + ((w - p.l - p.r) * (t - r.start)) / (r.end - r.start);
+  return p.l + ((w - p.l - p.r) * (chartCoordinate(t) - r.start)) / (r.end - r.start);
+}
+function chartTickLabel(timestamp) {
+  if ((window.chartSessionDays || []).length <= 1) return time(timestamp);
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric", month: "short", timeZone: "UTC",
+  }).format(new Date(`${istDay(timestamp)}T00:00:00Z`));
+}
+function chartHoverLabel(timestamp) {
+  return (window.chartSessionDays || []).length <= 1
+    ? time(timestamp)
+    : `${chartTickLabel(timestamp)} · ${time(timestamp)}`;
+}
+function chartTimeAtFraction(fraction) {
+  const range = window.chartCoordinateRange || { start: 0, end: 390 };
+  return chartTimestampAtCoordinate(
+    range.start + Math.max(0, Math.min(1, fraction)) * (range.end - range.start),
+  );
 }
 function darkerColor(color) {
   let h, s, l;
@@ -4840,6 +5186,7 @@ function drawSignedLine(ctx, values, color, X, Y, width = 2.5) {
 function drawMiniPlots(data) {
   const niftyCanvas = $("nifty-chart"),
     niftyStatus = $("nifty-empty");
+  data.percent.hoverSeries ||= sortBasketInfo(data.percent.series);
   if (data.index.points?.length) {
     updateIndexQuote(data.index.points, window.linkedHoverTime);
   } else {
@@ -4873,13 +5220,16 @@ function drawNiftyPlot(canvas, points, previousClose) {
   const box = canvas.getBoundingClientRect(),
     ratio = devicePixelRatio || 1;
   if (!box.width || !box.height || !points?.length) return;
-  canvas.width = box.width * ratio;
-  canvas.height = box.height * ratio;
+  if (canvas.width !== box.width * ratio) canvas.width = box.width * ratio;
+  if (canvas.height !== box.height * ratio) canvas.height = box.height * ratio;
   const ctx = canvas.getContext("2d");
-  ctx.scale(ratio, ratio);
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   const w = box.width,
     h = box.height,
-    p = { l: 58, r: 14, t: 12, b: 28 },
+    p = { l: 58, r: 14, t: 12, b: 28 };
+  ctx.clearRect(0, 0, w, h);
+  if (restorePlotBase(canvas, [points, previousClose], box, ratio, ctx)) return;
+  const
     values = points.map((point) => point.value),
     baseline = Number(previousClose) || values[0],
     lo = Math.min(baseline, ...values),
@@ -4966,50 +5316,68 @@ function drawNiftyPlot(canvas, points, previousClose) {
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   for (const t of chartTimeTicks())
-    ctx.fillText(time(t), chartX(t, p, w), h - p.b + 8);
-  const i =
-    window.linkedHoverTime == null
+    ctx.fillText(chartTickLabel(t), chartX(t, p, w), h - p.b + 8);
+  const pointTimes = points.map((point) => point.t);
+  const drawOverlay = () => {
+    const i = window.linkedHoverTime == null
       ? -1
-      : nearestTimeIndex(
-          points.map((point) => point.t),
-          window.linkedHoverTime,
-        );
-  if (i >= 0) {
+      : nearestTimeIndex(pointTimes, window.linkedHoverTime);
+    if (i < 0) return;
     const hoverX = chartX(window.linkedHoverTime, p, w),
-      hoverValue = interpolateAtTime(
-        points.map((point) => point.t),
-        points.map((point) => point.value),
-        window.linkedHoverTime,
-      ),
+      hoverValue = interpolateAtChartTime(pointTimes, values, window.linkedHoverTime),
       y = Y(hoverValue);
-    ctx.save();
-    ctx.setLineDash([4, 5]);
-    ctx.strokeStyle = "#a3aea7aa";
-    ctx.beginPath();
-    ctx.moveTo(hoverX, p.t);
-    ctx.lineTo(hoverX, h - p.b);
-    ctx.stroke();
-    ctx.restore();
-    ctx.beginPath();
-    ctx.arc(hoverX, y, 3.5, 0, Math.PI * 2);
-    ctx.fillStyle = hoverValue >= baseline ? green : red;
-    ctx.fill();
-    ctx.strokeStyle = "#eaf3ee";
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-  }
+    drawHoverCrosshair(ctx, hoverX, p.t, h - p.b);
+    drawHoverMarker(ctx, hoverX, y, hoverValue >= baseline ? green : red);
+  };
+  savePlotBase(canvas, [points, previousClose], box, ratio, drawOverlay);
+  drawOverlay();
+}
+function drawHoverCrosshair(ctx, x, top, bottom) {
+  const accent = getComputedStyle(document.documentElement)
+    .getPropertyValue("--site-accent")
+    .trim() || "#8c00ff";
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x, top);
+  ctx.lineTo(x, bottom);
+  ctx.globalAlpha = 0.16;
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x, top);
+  ctx.lineTo(x, bottom);
+  ctx.globalAlpha = 0.78;
+  ctx.strokeStyle = "#d8dee5";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.restore();
+}
+function drawHoverMarker(ctx, x, y, color, radius = 4) {
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.strokeStyle = "#f1f4f6";
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
 }
 function drawMiniPlot(canvas, times, series, mode) {
   const box = canvas.getBoundingClientRect(),
     ratio = devicePixelRatio || 1;
   if (!box.width || !box.height || !times.length || !series.length) return;
-  canvas.width = box.width * ratio;
-  canvas.height = box.height * ratio;
+  if (canvas.width !== box.width * ratio) canvas.width = box.width * ratio;
+  if (canvas.height !== box.height * ratio) canvas.height = box.height * ratio;
   const ctx = canvas.getContext("2d");
-  ctx.scale(ratio, ratio);
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   const w = box.width,
     h = box.height,
-    p = { l: 58, r: 14, t: 12, b: 28 },
+    p = { l: 58, r: 14, t: 12, b: 28 };
+  ctx.clearRect(0, 0, w, h);
+  if (restorePlotBase(canvas, [times, series, mode], box, ratio, ctx)) return;
+  const
     values = series.flatMap((s) => s.values),
     rawMin = Math.min(...values, ...(mode === "percent" ? [0] : [])),
     rawMax = Math.max(...values, ...(mode === "percent" ? [0] : [])),
@@ -5051,32 +5419,18 @@ function drawMiniPlot(canvas, times, series, mode) {
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   for (const t of chartTimeTicks())
-    ctx.fillText(time(t), chartX(t, p, w), h - p.b + 8);
-  const i =
-    window.linkedHoverTime == null
-      ? -1
-      : nearestTimeIndex(times, window.linkedHoverTime);
-  if (i >= 0) {
+    ctx.fillText(chartTickLabel(t), chartX(t, p, w), h - p.b + 8);
+  const drawOverlay = () => {
+    if (window.linkedHoverTime == null) return;
     const hoverX = chartX(window.linkedHoverTime, p, w);
-    ctx.save();
-    ctx.setLineDash([4, 5]);
-    ctx.strokeStyle = "#a3aea7aa";
-    ctx.beginPath();
-    ctx.moveTo(hoverX, p.t);
-    ctx.lineTo(hoverX, h - p.b);
-    ctx.stroke();
-    ctx.restore();
+    drawHoverCrosshair(ctx, hoverX, p.t, h - p.b);
     series.forEach((s) => {
-      const hoverValue = interpolateAtTime(times, s.values, window.linkedHoverTime);
-      ctx.beginPath();
-      ctx.arc(hoverX, Y(hoverValue), 3.5, 0, Math.PI * 2);
-      ctx.fillStyle = s.color;
-      ctx.fill();
-      ctx.strokeStyle = "#eaf3ee";
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
+      const hoverValue = interpolateAtChartTime(times, s.values, window.linkedHoverTime);
+      drawHoverMarker(ctx, hoverX, Y(hoverValue), s.color);
     });
-  }
+  };
+  savePlotBase(canvas, [times, series, mode], box, ratio, drawOverlay);
+  drawOverlay();
 }
 function showMiniHover(e) {
   const canvas = e.currentTarget,
@@ -5092,14 +5446,14 @@ function showMiniHover(e) {
                   d.index.points.at(-1).value >= d.index.points.previousClose
                     ? "#37c997"
                     : "#f27668",
-                values: d.index.points.map((p) => p.value),
+                values: getIndexReadoutSeries(d.index.points).prices,
               },
             ]
           : []
-        : sortBasketInfo(d?.percent.series || []),
+        : d?.percent.hoverSeries || [],
     times =
       mode === "price"
-        ? d?.index.points?.map((p) => p.t) || []
+        ? d?.index.points?.length ? getIndexReadoutSeries(d.index.points).times : []
         : d?.percent.times || [];
   if (!times.length || !series.length) return;
   const rect = canvas.getBoundingClientRect(),
@@ -5110,19 +5464,23 @@ function showMiniHover(e) {
     if (!canvas.hasPointerCapture(e.pointerId)) return clearMiniHover();
     x = Math.max(pad.l, Math.min(rect.width - pad.r, x));
   }
-  const target =
-      (window.chartXRange?.start || times[0]) +
-      ((x - pad.l) / pw) *
-        ((window.chartXRange?.end || times.at(-1)) -
-          (window.chartXRange?.start || times[0])),
+  const target = chartTimeAtFraction((x - pad.l) / pw),
     i = nearestTimeIndex(times, target),
     t = times[i];
+  const percentTip = mode === "percent" ? $("percent-tooltip") : null,
+    updatePercentTooltip = mode === "percent" &&
+      (i !== window.percentTooltipIndex || window.percentTooltipData !== d || percentTip.hidden);
+  if (mode === "percent") {
+    window.percentTooltipIndex = i;
+    window.percentTooltipData = d;
+  }
   window.linkedHoverTime = target;
   window.hoverIndex = i;
   if (mode === "percent") {
-    const tip = $("percent-tooltip"),
+    const tip = percentTip,
       rows = $("percent-tooltip-rows");
-    $("percent-tooltip-time").textContent = time(t);
+    if (updatePercentTooltip) {
+    $("percent-tooltip-time").textContent = chartHoverLabel(t);
     const rowCache = percentTooltipRows.get(rows) || new Map(),
       activeNames = new Set(),
       nextRows = series.map((s) => {
@@ -5153,6 +5511,7 @@ function showMiniHover(e) {
     if (currentRows.length !== nextRows.length || nextRows.some((row, index) => currentRows[index] !== row))
       rows.replaceChildren(...nextRows);
     percentTooltipRows.set(rows, rowCache);
+    }
     setChartTooltipVisible(tip, true);
     positionTopTooltip(tip, x, rect.width);
   } else {
@@ -5197,15 +5556,16 @@ function showChartHover(e) {
     x = Math.max(pad.l, Math.min(rect.width - pad.r, x));
     y = Math.max(pad.t, Math.min(rect.height - pad.b, y));
   }
-  const target =
-      (window.chartXRange?.start || d.times[0]) +
-      ((x - pad.l) / pw) *
-        ((window.chartXRange?.end || d.times.at(-1)) -
-          (window.chartXRange?.start || d.times[0])),
+  const target = chartTimeAtFraction((x - pad.l) / pw),
     i = nearestTimeIndex(d.times, target);
+  const tip = $("chart-tooltip"),
+    updateTooltip = i !== window.chartTooltipIndex || window.chartTooltipData !== d || tip.hidden;
+  window.chartTooltipIndex = i;
+  window.chartTooltipData = d;
   window.linkedHoverTime = target;
   window.hoverIndex = i;
-  $("tooltip-time").textContent = time(d.times[i]);
+  if (updateTooltip) {
+  $("tooltip-time").textContent = chartHoverLabel(d.times[i]);
   const rows = $("tooltip-rows"),
     rowCache = pnlTooltipRows.get(rows) || new Map(),
     baskets = sortBasketInfo(d.baskets.map((basket, index) => ({ ...basket, index }))),
@@ -5249,7 +5609,7 @@ function showChartHover(e) {
   if (currentRows.length !== nextRows.length || nextRows.some((row, index) => currentRows[index] !== row))
     rows.replaceChildren(...nextRows);
   pnlTooltipRows.set(rows, rowCache);
-  const tip = $("chart-tooltip");
+  }
   setChartTooltipVisible(tip, true);
   positionTopTooltip(tip, x, rect.width);
   setChartTooltipVisible($("percent-tooltip"), false);
@@ -5268,13 +5628,16 @@ function draw(d) {
     box = c.getBoundingClientRect(),
     ratio = devicePixelRatio || 1;
   if (!box.width || !box.height || !d.series.length) return;
-  c.width = box.width * ratio;
-  c.height = box.height * ratio;
+  if (c.width !== box.width * ratio) c.width = box.width * ratio;
+  if (c.height !== box.height * ratio) c.height = box.height * ratio;
   const ctx = c.getContext("2d");
-  ctx.scale(ratio, ratio);
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   const w = box.width,
     h = box.height,
-    p = { l: 58, r: 14, t: 18, b: 32 },
+    p = { l: 58, r: 14, t: 18, b: 32 };
+  ctx.clearRect(0, 0, w, h);
+  if (restorePlotBase(c, [d], box, ratio, ctx)) return;
+  const
     vals = d.series.flatMap((s) => s.values),
     lo = Math.min(0, ...vals),
     hi = Math.max(0, ...vals),
@@ -5318,32 +5681,25 @@ function draw(d) {
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   for (const t of chartTimeTicks())
-    ctx.fillText(time(t), chartX(t, p, w), h - p.b + 10);
-  if (window.hoverIndex != null) {
+    ctx.fillText(chartTickLabel(t), chartX(t, p, w), h - p.b + 10);
+  const seriesByBasket = d.baskets.map((_, index) =>
+    d.series.map((point) => point.values[index]),
+  );
+  const drawOverlay = () => {
+    if (window.hoverIndex == null) return;
     const hoverX = chartX(window.linkedHoverTime, p, w);
-    ctx.save();
-    ctx.setLineDash([5, 6]);
-    ctx.strokeStyle = "#a3aea7aa";
-    ctx.beginPath();
-    ctx.moveTo(hoverX, p.t);
-    ctx.lineTo(hoverX, h - p.b);
-    ctx.stroke();
-    ctx.restore();
-    d.baskets.forEach((b, j) => {
-      const hoverValue = interpolateAtTime(
+    drawHoverCrosshair(ctx, hoverX, p.t, h - p.b);
+    d.baskets.forEach((basket, index) => {
+      const hoverValue = interpolateAtChartTime(
         d.times,
-        d.series.map((point) => point.values[j]),
+        seriesByBasket[index],
         window.linkedHoverTime,
       );
-      ctx.beginPath();
-      ctx.arc(hoverX, Y(hoverValue), 4, 0, Math.PI * 2);
-      ctx.fillStyle = b.color;
-      ctx.fill();
-      ctx.strokeStyle = "#eaf3ee";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      drawHoverMarker(ctx, hoverX, Y(hoverValue), basket.color);
     });
-  }
+  };
+  savePlotBase(c, [d], box, ratio, drawOverlay);
+  drawOverlay();
 }
 $("upstox-status").addEventListener("click", showUpstoxDialog);
 $("token-form").addEventListener("submit", saveUpstoxToken);

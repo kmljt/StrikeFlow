@@ -13,6 +13,9 @@ let upstoxToken = fs.existsSync(tokenFile)
 const requestToken = new AsyncLocalStorage();
 const suggestionCache = new Map();
 const timedPriceCache = new Map();
+const historyCache = new Map();
+const contractCache = new Map();
+const priorCloseCache = new Map();
 const MARKETS = {
   NIFTY: { name: "NIFTY 50", indexKey: "NSE_INDEX|Nifty 50", foPrefix: "NSE_FO|", lotSize: 65, step: 50 },
   SENSEX: { name: "SENSEX", indexKey: "BSE_INDEX|SENSEX", foPrefix: "BSE_FO|", lotSize: 20, step: 100 },
@@ -122,7 +125,7 @@ function expiredInstrumentKey(instrumentKey, expiry) {
   const [year, month, day] = expiry.split("-");
   return `${instrumentKey}|${day}-${month}-${year}`;
 }
-async function upstoxHistory(
+async function upstoxHistoryRequest(
   instrumentKey,
   from,
   to,
@@ -130,6 +133,28 @@ async function upstoxHistory(
   isExpired,
   expiry,
 ) {
+  const today = todayIST();
+  if (
+    interval !== "day" &&
+    from < today &&
+    to === addCalendarDays(today, 1)
+  ) {
+    const [historical, intraday] = await Promise.all([
+      upstoxHistory(instrumentKey, from, today, interval, isExpired, expiry),
+      upstoxHistory(instrumentKey, today, to, interval, isExpired, expiry),
+    ]);
+    const byTimestamp = new Map(
+      [...(historical.candles || []), ...(intraday.candles || [])].map((candle) => [
+        candle[0],
+        candle,
+      ]),
+    );
+    return {
+      candles: [...byTimestamp.values()].sort(
+        (a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime(),
+      ),
+    };
+  }
   const encoded = encodeURIComponent(instrumentKey);
   const endpoint = from === todayIST() && interval !== "day"
       ? new URL(
@@ -169,6 +194,24 @@ async function upstoxHistory(
   );
   return { candles: expiredData?.candles || [] };
 }
+async function cachedRequest(cache, key, ttlMs, request) {
+  const now = Date.now(), cached = cache.get(key);
+  if (cached && cached.expires > now) return cached.promise;
+  const promise = Promise.resolve().then(request);
+  cache.set(key, { promise, expires: now + ttlMs });
+  try {
+    return await promise;
+  } catch (error) {
+    if (cache.get(key)?.promise === promise) cache.delete(key);
+    throw error;
+  }
+}
+function upstoxHistory(instrumentKey, from, to, interval, isExpired, expiry) {
+  const key = [instrumentKey, from, to, interval, Boolean(isExpired), expiry || ""].join("|");
+  return cachedRequest(historyCache, key, 30_000, () =>
+    upstoxHistoryRequest(instrumentKey, from, to, interval, isExpired, expiry),
+  );
+}
 async function resolveNiftyOption(expiry, strike, type, market = "NIFTY") {
   const config = marketConfig(market), contracts = await niftyContracts(expiry, market);
   const found = (contracts || []).find(
@@ -185,6 +228,8 @@ async function resolveNiftyOption(expiry, strike, type, market = "NIFTY") {
   };
 }
 async function niftyContracts(expiry, market = "NIFTY") {
+  const key = `${market}|${expiry}`;
+  return cachedRequest(contractCache, key, 5 * 60_000, async () => {
   const expired = expiry < todayIST();
   const params = { instrument_key: marketConfig(market).indexKey, expiry_date: expiry };
   try {
@@ -194,6 +239,7 @@ async function niftyContracts(expiry, market = "NIFTY") {
     if (!expired) throw error;
   }
   return (await upstoxGet(upstoxURL("/expired-instruments/option/contract", params))) || [];
+  });
 }
 async function priorClose(instrumentKey, day, expired = false, expiry) {
   const from = new Date(`${day}T00:00:00Z`);
@@ -485,16 +531,19 @@ async function routeRequest(req, res) {
       });
     const expiry = url.searchParams.get("expiry"),
       day = url.searchParams.get("day"),
+      referenceDay = url.searchParams.get("referenceDay") || day,
       entryTime = normalizeEntryTime(url.searchParams.get("entryTime"));
     if (
       !/^\d{4}-\d{2}-\d{2}$/.test(expiry || "") ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(day || "")
+      !/^\d{4}-\d{2}-\d{2}$/.test(day || "") ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(referenceDay || "") ||
+      referenceDay > day
     )
       return send(res, 400, { error: `Choose a valid ${config.name} expiry and trading day.` });
     try {
       const [contracts, reference] = await Promise.all([
         niftyContracts(expiry, market),
-        priorPriceAt(config.indexKey, day, entryTime),
+        priorPriceAt(config.indexKey, referenceDay, entryTime),
       ]);
       const options = contracts
         .filter(
@@ -512,6 +561,7 @@ async function routeRequest(req, res) {
         lotSize: Number(contracts[0]?.lot_size) || config.lotSize,
         referenceClose: reference?.close ?? null,
         referenceDate: reference?.date ?? null,
+        referenceDay,
         entryTime,
       });
     } catch (e) {
@@ -659,6 +709,7 @@ async function routeRequest(req, res) {
       });
     const expiry = url.searchParams.get("expiry"),
       day = url.searchParams.get("day"),
+      referenceDay = url.searchParams.get("referenceDay") || day,
       entryTime = normalizeEntryTime(url.searchParams.get("entryTime")),
       otmPoints = Number(url.searchParams.get("otmPoints")),
       requestedCenter = url.searchParams.has("center")
@@ -668,6 +719,8 @@ async function routeRequest(req, res) {
     if (
       !/^\d{4}-\d{2}-\d{2}$/.test(expiry || "") ||
       !/^\d{4}-\d{2}-\d{2}$/.test(day || "") ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(referenceDay || "") ||
+      referenceDay > day ||
       expiry < day ||
       !Number.isInteger(otmPoints) ||
       otmPoints < -10000 ||
@@ -687,7 +740,7 @@ async function routeRequest(req, res) {
       });
     try {
       const [reference, contracts] = await Promise.all([
-        priorPriceAt(config.indexKey, day, entryTime),
+        priorPriceAt(config.indexKey, referenceDay, entryTime),
         niftyContracts(expiry, market),
       ]);
       if (!reference)
@@ -704,7 +757,7 @@ async function routeRequest(req, res) {
         );
         if (!contract)
           throw new Error(`No ${type === "CE" ? "call" : "put"} contract is listed at ${target}.`);
-        const premium = await priorPriceAt(contract.instrument_key, day, entryTime, expired, expiry),
+        const premium = await priorPriceAt(contract.instrument_key, referenceDay, entryTime, expired, expiry),
           strike = Number(contract.strike_price),
           actualOTM = Math.round(type === "CE"
             ? strike - reference.close
@@ -725,6 +778,7 @@ async function routeRequest(req, res) {
       return send(res, 200, {
         expiry,
         day,
+        referenceDay,
         center,
         otmPoints,
         referenceClose: reference.close,
@@ -805,27 +859,43 @@ async function routeRequest(req, res) {
         error: `Connect Upstox first to load ${config.name} prices.`,
       });
     const day = url.searchParams.get("day"),
+      from = url.searchParams.get("from"),
+      to = url.searchParams.get("to"),
       interval = url.searchParams.get("interval"),
       entryTime = normalizeEntryTime(url.searchParams.get("entryTime"));
     if (
-      !/^\d{4}-\d{2}-\d{2}$/.test(day || "") ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(from || day || "") ||
+      (to && !/^\d{4}-\d{2}-\d{2}$/.test(to)) ||
       !["1minute", "5minute", "15minute", "30minute"].includes(interval || "")
     )
       return send(res, 400, { error: `Invalid ${config.name} chart request.` });
     try {
+      const startDay = from || day, endDay = to || day;
+      if (startDay !== endDay) {
+        const [history, previous] = await Promise.all([
+          upstoxHistory(config.indexKey, startDay, addCalendarDays(endDay, 1), interval, false),
+          priorPriceAt(config.indexKey, startDay, entryTime),
+        ]);
+        return send(res, 200, {
+          ...history,
+          previousClose: previous?.close ?? null,
+          previousCloseDate: previous?.date ?? null,
+        });
+      }
       const [history, previous] = await Promise.all([
         upstoxHistory(
           config.indexKey,
-          day,
-          addCalendarDays(day, 1),
+          startDay,
+          addCalendarDays(startDay, 1),
           interval,
           false,
         ),
-        priorPriceAt(config.indexKey, day, entryTime),
+        priorPriceAt(config.indexKey, startDay, entryTime),
       ]);
       return send(res, 200, {
         ...history,
         previousClose: previous?.close ?? null,
+        previousCloseDate: previous?.date ?? null,
       });
     } catch (e) {
       return send(res, 502, { error: e.message });

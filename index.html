@@ -442,6 +442,9 @@
         flex-direction: column;
         align-items: flex-end;
         line-height: 1.25;
+        flex: 0 0 8.4em;
+        min-width: 8.4em;
+        font-variant-numeric: tabular-nums lining-nums;
       }
       .tooltip-basket-value b {
         white-space: nowrap;
@@ -1734,6 +1737,37 @@
       .result-head {
         align-items: center;
         padding: 0 3px 13px;
+      }
+      .chart-range-picker {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        margin: 0 0 15px;
+        padding: 3px;
+        border: 1px solid #25282d;
+        border-radius: 10px;
+        background: #050607;
+      }
+      .chart-range-button {
+        min-width: 42px;
+        min-height: 32px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: #929ba4;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      .chart-range-button[aria-pressed="true"] {
+        background: #a100ff20;
+        color: var(--site-accent, #a100ff);
+      }
+      .chart-range-button:focus-visible {
+        outline: 2px solid var(--site-accent, #a100ff);
+        outline-offset: 1px;
       }
       .ticker h2 {
         font-size: 14px;
@@ -3876,11 +3910,16 @@
       .index-quote-change.red{color:var(--red)}
       .odometer-digit{display:inline-block;width:.59em;height:1em;overflow:hidden;line-height:1em;text-align:center}
       .odometer-strip{display:flex;flex-direction:column;line-height:1em;will-change:transform}
-      .odometer-strip>span{display:grid;place-items:center;height:1em;flex:0 0 1em}
-      .odometer-static{display:inline-block;height:1em;white-space:pre}
-      .odometer-digit,.odometer-static{vertical-align:middle}
-      .odometer-currency{transform:translateY(-.035em)}
-      .tooltip-basket-percent,.tooltip-basket-change{display:inline-flex;align-items:center;justify-content:flex-end;min-height:1em;line-height:1;font-variant-numeric:tabular-nums}
+      .odometer-strip>span{display:block;height:1em;flex:0 0 1em;line-height:1em;text-align:center}
+      .odometer-static{display:inline-block;height:1em;line-height:1em;white-space:pre}
+      .odometer-digit,.odometer-static{vertical-align:baseline}
+      .index-quote-change .odometer-sign,.index-quote-change .odometer-currency,.index-quote-change .odometer-decimal,.index-quote-change .odometer-comma,.index-quote-change .odometer-percent,
+      .basket-head strong .odometer-sign,.basket-head strong .odometer-currency,.basket-head strong .odometer-decimal,.basket-head strong .odometer-comma{position:relative;top:-2px}
+      .chart-tooltip .tooltip-basket-value .odometer-sign,.chart-tooltip .tooltip-basket-value .odometer-currency,.chart-tooltip .tooltip-basket-value .odometer-decimal,.chart-tooltip .tooltip-basket-value .odometer-comma,
+      .chart-tooltip .tooltip-basket-change .odometer-sign,.chart-tooltip .tooltip-basket-change .odometer-currency,.chart-tooltip .tooltip-basket-change .odometer-decimal,.chart-tooltip .tooltip-basket-change .odometer-comma,.chart-tooltip .tooltip-basket-change .odometer-percent{position:relative;top:-2px}
+      .basket-head .basket-head-raised-glyph{position:relative;top:-2px}
+      .tooltip-basket-percent,.tooltip-basket-change{display:inline-flex;align-items:center;justify-content:flex-end;min-height:1em;line-height:1;font-variant-numeric:tabular-nums lining-nums;white-space:nowrap}
+      .tooltip-basket-value>b,.tooltip-basket-value>small{box-sizing:border-box;width:100%;white-space:nowrap;font-variant-numeric:tabular-nums lining-nums}
       .quote-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
       @media(max-width:520px){.index-quote-readout{align-items:flex-end;gap:7px}.index-quote-price{font-size:clamp(21px,7vw,28px)}.index-quote-change{font-size:12px}.index-quote-time{font-size:9px}}
     </style>
@@ -3932,6 +3971,12 @@
             <div class="ticker"><h2 id="title">Options P&amp;L</h2></div>
             <div id="dates" class="subline"></div>
           </div>
+        </div>
+        <div class="chart-range-picker" role="group" aria-label="Chart date range">
+          <button class="chart-range-button" type="button" data-chart-range="1D" aria-pressed="true">1D</button>
+          <button class="chart-range-button" type="button" data-chart-range="5D" aria-pressed="false">5D</button>
+          <button class="chart-range-button" type="button" data-chart-range="10D" aria-pressed="false">10D</button>
+          <button class="chart-range-button" type="button" data-chart-range="1M" aria-pressed="false">1M</button>
         </div>
         <section class="mini-plot">
           <h3 id="index-chart-title">NIFTY 50</h3>
@@ -4323,6 +4368,6 @@
         >
       </div>
     </main>
-    <script src="app.js?v=touch-graph-scrub"></script>
+    <script src="app.js?v=bulk-strangle-range-scale-missing-session-recovery"></script>
   </body>
 </html>
