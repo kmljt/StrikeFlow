@@ -1,6 +1,6 @@
 const UPSTOX_TOKEN_KEY = "strikeflow-upstox-token";
 const LAST_TRADING_DAY_KEY = "pnl-last-trading-day";
-const HAPTIC_CLICK_MS = 12;
+const HAPTIC_CLICK_MS = 1;
 const ENTRY_TIME_KEY = "strikeflow-entry-time";
 const HOVER_NUMBER_FORMAT = new Intl.NumberFormat("en-IN", {
   minimumFractionDigits: 2,
