@@ -14,8 +14,11 @@ const requestToken = new AsyncLocalStorage();
 const suggestionCache = new Map();
 const timedPriceCache = new Map();
 const historyCache = new Map();
+const historyRangeCache = new Map();
 const contractCache = new Map();
 const priorCloseCache = new Map();
+const indexDayCache = new Map();
+const yahooChartCache = new Map();
 const MARKETS = {
   NIFTY: { name: "NIFTY 50", indexKey: "NSE_INDEX|Nifty 50", foPrefix: "NSE_FO|", lotSize: 65, step: 50 },
   SENSEX: { name: "SENSEX", indexKey: "BSE_INDEX|SENSEX", foPrefix: "BSE_FO|", lotSize: 20, step: 100 },
@@ -133,6 +136,39 @@ async function upstoxHistoryRequest(
   isExpired,
   expiry,
 ) {
+  if (isExpired && interval === "10minute") {
+    const source = await upstoxHistory(instrumentKey, from, to, "5minute", true, expiry),
+      buckets = new Map();
+    for (const candle of source.candles || []) {
+      const date = new Date(candle[0]),
+        parts = new Intl.DateTimeFormat("en-GB", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+          timeZone: "Asia/Kolkata",
+        }).formatToParts(date),
+        hour = Number(parts.find((part) => part.type === "hour")?.value),
+        minute = Number(parts.find((part) => part.type === "minute")?.value),
+        sessionOffset = hour * 60 + minute - (9 * 60 + 15);
+      if (!Number.isFinite(sessionOffset) || sessionOffset < 0) continue;
+      const key = `${dateIST(date)}|${Math.floor(sessionOffset / 10)}`,
+        bucket = buckets.get(key);
+      if (!bucket) {
+        buckets.set(key, [...candle]);
+        continue;
+      }
+      bucket[2] = Math.max(Number(bucket[2]), Number(candle[2]));
+      bucket[3] = Math.min(Number(bucket[3]), Number(candle[3]));
+      bucket[4] = candle[4];
+      bucket[5] = (Number(bucket[5]) || 0) + (Number(candle[5]) || 0);
+      bucket[6] = candle[6];
+    }
+    return {
+      candles: [...buckets.values()].sort(
+        (a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime(),
+      ),
+    };
+  }
   const today = todayIST();
   if (
     interval !== "day" &&
@@ -207,10 +243,105 @@ async function cachedRequest(cache, key, ttlMs, request) {
   }
 }
 function upstoxHistory(instrumentKey, from, to, interval, isExpired, expiry) {
-  const key = [instrumentKey, from, to, interval, Boolean(isExpired), expiry || ""].join("|");
-  return cachedRequest(historyCache, key, 30_000, () =>
-    upstoxHistoryRequest(instrumentKey, from, to, interval, isExpired, expiry),
-  );
+  const key = [instrumentKey, from, to, interval, Boolean(isExpired), expiry || ""].join("|"),
+    now = Date.now(),
+    live = interval !== "day" && to > todayIST(),
+    ttl = live ? 10_000 : 30 * 60_000;
+  for (const cached of historyRangeCache.values()) {
+    if (
+      cached.expires > now &&
+      cached.instrumentKey === instrumentKey &&
+      cached.interval === interval &&
+      cached.expired === Boolean(isExpired) &&
+      cached.expiry === (expiry || "") &&
+      cached.from <= from && cached.to >= to
+    ) {
+      return {
+        candles: cached.candles.filter((candle) => {
+          const day = dateIST(new Date(candle[0]));
+          return day >= from && day < to;
+        }),
+      };
+    }
+  }
+  return cachedRequest(historyCache, key, live ? 10_000 : 30_000, async () => {
+    const result = await upstoxHistoryRequest(instrumentKey, from, to, interval, isExpired, expiry),
+      candles = result.candles || [],
+      resultTtl = candles.length ? ttl : 15_000;
+    historyRangeCache.set(key, {
+      instrumentKey,
+      from,
+      to,
+      interval,
+      expired: Boolean(isExpired),
+      expiry: expiry || "",
+      candles,
+      expires: Date.now() + resultTtl,
+    });
+    if (historyRangeCache.size > 1200) {
+      for (const [cachedKey, cached] of historyRangeCache)
+        if (cached.expires <= Date.now()) historyRangeCache.delete(cachedKey);
+      while (historyRangeCache.size > 1000)
+        historyRangeCache.delete(historyRangeCache.keys().next().value);
+    }
+    return result;
+  });
+}
+async function cachedIndexHistory(instrumentKey, from, to, interval, sessionDays, retryMissing = false) {
+  const days = [...new Set(sessionDays)].filter((day) => day >= from && day <= to).sort(),
+    retried = new Set();
+  for (const day of days) {
+    const key = [instrumentKey, interval, day].join("|"), cached = indexDayCache.get(key);
+    if (cached && cached.expires > Date.now() && retryMissing && !cached.candles.length && !cached.retried) {
+      indexDayCache.delete(key);
+      retried.add(day);
+    }
+  }
+  const missing = days.filter((day) => {
+    const cached = indexDayCache.get([instrumentKey, interval, day].join("|"));
+    return !cached || cached.expires <= Date.now();
+  });
+  for (let index = 0; index < missing.length;) {
+    // Keep intraday history requests small. A full 1M chart can cover more
+    // than 30 calendar days once weekends and holidays are included, which
+    // Upstox rejects as an invalid date range even though it is only 21
+    // trading sessions. Five sessions per request stay within the provider's
+    // range limits while still allowing several days to be fetched together.
+    const group = [missing[index++]];
+    while (index < missing.length && group.length < 5) {
+      const candidate = missing[index],
+        candidatePosition = days.indexOf(candidate),
+        previousPosition = days.indexOf(group.at(-1));
+      if (candidatePosition !== previousPosition + 1) break;
+      group.push(candidate);
+      index++;
+    }
+    const result = await upstoxHistory(
+        instrumentKey,
+        group[0],
+        addCalendarDays(group.at(-1), 1),
+        interval,
+        false,
+      ),
+      candlesByDay = new Map();
+    for (const candle of result.candles || []) {
+      const day = dateIST(new Date(candle[0]));
+      if (!candlesByDay.has(day)) candlesByDay.set(day, []);
+      candlesByDay.get(day).push(candle);
+    }
+    for (const day of group) {
+      const candles = candlesByDay.get(day) || [],
+        key = [instrumentKey, interval, day].join("|"),
+        ttl = candles.length
+          ? day === todayIST() ? 10_000 : 30 * 60_000
+          : retried.has(day) || retryMissing ? 30 * 60_000 : 15_000;
+      indexDayCache.set(key, { candles, retried: retried.has(day) || retryMissing, expires: Date.now() + ttl });
+    }
+  }
+  return {
+    candles: days.flatMap((day) => indexDayCache.get([instrumentKey, interval, day].join("|"))?.candles || [])
+      .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime()),
+  };
 }
 async function resolveNiftyOption(expiry, strike, type, market = "NIFTY") {
   const config = marketConfig(market), contracts = await niftyContracts(expiry, market);
@@ -242,29 +373,32 @@ async function niftyContracts(expiry, market = "NIFTY") {
   });
 }
 async function priorClose(instrumentKey, day, expired = false, expiry) {
-  const from = new Date(`${day}T00:00:00Z`);
-  from.setUTCDate(from.getUTCDate() - 14);
-  const fromDay = from.toISOString().slice(0, 10),
-    encoded = encodeURIComponent(instrumentKey);
-  const candlesFor = (data) => (data?.candles || [])
-      .map((c) => ({ date: String(c[0]).slice(0, 10), close: Number(c[4]) }))
-      .filter((c) => c.date < day && Number.isFinite(c.close))
-      .sort((a, b) => a.date.localeCompare(b.date));
-  try {
+  const key = [instrumentKey, day, Boolean(expired), expiry || ""].join("|");
+  return cachedRequest(priorCloseCache, key, 30 * 60_000, async () => {
+    const from = new Date(`${day}T00:00:00Z`);
+    from.setUTCDate(from.getUTCDate() - 14);
+    const fromDay = from.toISOString().slice(0, 10),
+      encoded = encodeURIComponent(instrumentKey);
+    const candlesFor = (data) => (data?.candles || [])
+        .map((c) => ({ date: String(c[0]).slice(0, 10), close: Number(c[4]) }))
+        .filter((c) => c.date < day && Number.isFinite(c.close))
+        .sort((a, b) => a.date.localeCompare(b.date));
+    try {
+      const data = await upstoxGet(
+        upstoxURL(`/historical-candle/${encoded}/day/${addCalendarDays(day, 1)}/${fromDay}`),
+      );
+      const prior = candlesFor(data).at(-1);
+      if (prior || !expired) return prior || null;
+    } catch (error) {
+      if (!expired) throw error;
+    }
     const data = await upstoxGet(
-      upstoxURL(`/historical-candle/${encoded}/day/${addCalendarDays(day, 1)}/${fromDay}`),
+      upstoxURL(
+        `/expired-instruments/historical-candle/${encodeURIComponent(expiredInstrumentKey(instrumentKey, expiry))}/day/${addCalendarDays(day, 1)}/${fromDay}`,
+      ),
     );
-    const prior = candlesFor(data).at(-1);
-    if (prior || !expired) return prior || null;
-  } catch (error) {
-    if (!expired) throw error;
-  }
-  const data = await upstoxGet(
-    upstoxURL(
-      `/expired-instruments/historical-candle/${encodeURIComponent(expiredInstrumentKey(instrumentKey, expiry))}/day/${addCalendarDays(day, 1)}/${fromDay}`,
-    ),
-  );
-  return candlesFor(data).at(-1) || null;
+    return candlesFor(data).at(-1) || null;
+  });
 }
 const ENTRY_TIMES = new Set(["15:20", "15:30", "15:40"]);
 function normalizeEntryTime(value) { return ENTRY_TIMES.has(value) ? value : "15:40"; }
@@ -837,7 +971,7 @@ async function routeRequest(req, res) {
       !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(from || "") ||
       !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(to || "") ||
       (expiry && !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(expiry)) ||
-      !["1minute", "5minute", "15minute", "30minute", "day"].includes(
+      !["1minute", "5minute", "10minute", "15minute", "30minute", "day"].includes(
         interval || "",
       )
     )
@@ -862,33 +996,33 @@ async function routeRequest(req, res) {
       from = url.searchParams.get("from"),
       to = url.searchParams.get("to"),
       interval = url.searchParams.get("interval"),
-      entryTime = normalizeEntryTime(url.searchParams.get("entryTime"));
+      entryTime = normalizeEntryTime(url.searchParams.get("entryTime")),
+      sessionsParam = url.searchParams.get("sessions");
     if (
       !/^\d{4}-\d{2}-\d{2}$/.test(from || day || "") ||
       (to && !/^\d{4}-\d{2}-\d{2}$/.test(to)) ||
-      !["1minute", "5minute", "15minute", "30minute"].includes(interval || "")
+      !["1minute", "5minute", "10minute", "15minute", "30minute"].includes(interval || "")
     )
       return send(res, 400, { error: `Invalid ${config.name} chart request.` });
     try {
       const startDay = from || day, endDay = to || day;
-      if (startDay !== endDay) {
-        const [history, previous] = await Promise.all([
-          upstoxHistory(config.indexKey, startDay, addCalendarDays(endDay, 1), interval, false),
-          priorPriceAt(config.indexKey, startDay, entryTime),
-        ]);
-        return send(res, 200, {
-          ...history,
-          previousClose: previous?.close ?? null,
-          previousCloseDate: previous?.date ?? null,
-        });
-      }
+      const sessionDays = sessionsParam
+          ? sessionsParam.split(",")
+          : [startDay],
+        validSessions = sessionDays.length > 0 && sessionDays.length <= 32 &&
+          sessionDays.every((sessionDay) =>
+            /^\d{4}-\d{2}-\d{2}$/.test(sessionDay) && sessionDay >= startDay && sessionDay <= endDay,
+          );
+      if (!validSessions || startDay > endDay)
+        return send(res, 400, { error: `Invalid ${config.name} chart sessions.` });
       const [history, previous] = await Promise.all([
-        upstoxHistory(
+        cachedIndexHistory(
           config.indexKey,
           startDay,
-          addCalendarDays(startDay, 1),
+          endDay,
           interval,
-          false,
+          sessionDays,
+          url.searchParams.get("retryMissing") === "true",
         ),
         priorPriceAt(config.indexKey, startDay, entryTime),
       ]);
@@ -916,15 +1050,22 @@ async function routeRequest(req, res) {
     const remote = new URL(
       `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`,
     );
-    remote.search = new URLSearchParams({
+    const query = new URLSearchParams({
       period1,
       period2,
       interval,
       events: "history",
       includeAdjustedClose: "true",
-    }).toString();
+    });
+    remote.search = query.toString();
     try {
-      const result = await getJson(remote, { "User-Agent": "Mozilla/5.0" });
+      const key = [symbol, period1, period2, interval].join("|"),
+        ttl = Number(period2) > Math.floor(Date.now() / 1000) ? 10_000 : 30 * 60_000,
+        result = await cachedRequest(yahooChartCache, key, ttl, async () => {
+          const response = await getJson(remote, { "User-Agent": "Mozilla/5.0" });
+          if (response.status >= 400) throw new Error("Market data service is unavailable");
+          return response;
+        });
       res.writeHead(result.status, {
         "content-type": "application/json",
         "cache-control": "no-store",

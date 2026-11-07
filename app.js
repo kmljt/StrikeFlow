@@ -1,20 +1,26 @@
 const UPSTOX_TOKEN_KEY = "strikeflow-upstox-token";
 const LAST_TRADING_DAY_KEY = "pnl-last-trading-day";
-const HAPTIC_CLICK_MS = 2;
+const HAPTIC_CLICK_MS = 1;
 const ENTRY_TIME_KEY = "strikeflow-entry-time";
 const HOVER_NUMBER_FORMAT = new Intl.NumberFormat("en-IN", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
-const DEFAULT_STRANGLE_OFFSETS = [0, 100, 200, 300, 400, 500];
-const CHART_RANGE_SESSION_SCALE = { "1D": 1, "5D": 5, "10D": 10, "1M": 20 };
+const BULK_OFFSET_CONFIGS = {
+  "1D": { min: -200, max: 1000, step: 50, scale: 1 },
+  "5D": { min: -500, max: 2500, step: 100, scale: 2.5 },
+  "10D": { min: -500, max: 2500, step: 100, scale: 2.5 },
+  "1M": { min: -500, max: 2500, step: 100, scale: 2.5 },
+};
 const MARKET_KEY = "strikeflow-market";
+const BULK_KIND_KEY = "strikeflow-bulk-kind";
 let selectedMarket = localStorage.getItem(MARKET_KEY) === "SENSEX" ? "SENSEX" : "NIFTY";
 let selectedEntryTime = ["15:20", "15:30", "15:40"].includes(localStorage.getItem(ENTRY_TIME_KEY))
   ? localStorage.getItem(ENTRY_TIME_KEY)
   : "15:40";
-let selectedChartRange = "1D";
+let selectedChartRange = document.querySelector('.chart-range-button[aria-pressed="true"]')?.dataset.chartRange || "1D";
 let chartCoordinateCache = new WeakMap();
+const chartHapticPositions = new WeakMap();
 const marketInfo = () => selectedMarket === "SENSEX"
   ? { name: "SENSEX", lotSize: Number(window.marketLotSize) || 20, step: 100, yahoo: "^BSESN" }
   : { name: "NIFTY", lotSize: Number(window.marketLotSize) || 65, step: 50, yahoo: "^NSEI" };
@@ -71,6 +77,14 @@ function getChartSessionDays(endDay, range = selectedChartRange) {
 function chartReferenceDay(day, range = selectedChartRange) {
   const sessions = getChartSessionDays(day, range);
   return range === "1D" ? day : sessions[0] || day;
+}
+function chartDataInterval() {
+  return {
+    "1D": "1minute",
+    "5D": "5minute",
+    "10D": "5minute",
+    "1M": "10minute",
+  }[selectedChartRange] || "1minute";
 }
 function setChartTimeline(days) {
   chartCoordinateCache = new WeakMap();
@@ -525,6 +539,10 @@ let state = loadState(),
   refreshTimer = null,
   requestGeneration = 0,
   siteAccentColor = "#ff9f43";
+const savedBulkKind = localStorage.getItem(BULK_KIND_KEY);
+let selectedBulkKind = ["CALL", "PUT", "STRANGLE"].includes(state.bulkContext?.kind)
+  ? state.bulkContext.kind
+  : ["CALL", "PUT", "STRANGLE"].includes(savedBulkKind) ? savedBulkKind : "STRANGLE";
 if (initializeDefaultBasketsOnStart) {
   state.baskets = [];
   state.activeId = null;
@@ -575,6 +593,10 @@ $("bulk-add-strangles").addEventListener("click", () => {
   $("bulk-add-strangles").setAttribute("aria-expanded", String(open));
   if (open) syncBulkCenterInput();
 });
+document.querySelectorAll("[data-bulk-kind]").forEach((button) => {
+  button.addEventListener("click", () => setBulkBasketKind(button.dataset.bulkKind));
+});
+syncBulkKindPicker();
 $("bulk-strangle-center").addEventListener("input", scheduleBulkCenterUpdate);
 $("bulk-strangle-center").addEventListener("change", () => {
   const value = $("bulk-strangle-center").value.trim();
@@ -749,6 +771,7 @@ dateField.addEventListener("change", () => {
     center: null,
     lots: 1,
     autoCenter: true,
+    kind: selectedBulkKind,
   };
   saveState();
   syncBulkCenterInput();
@@ -787,7 +810,19 @@ async function fetchSimpleStranglePick({ day, expiry, offset, lots = 1, center =
     throw Error(result.error || `Could not load the ${offset}-point strangle.`);
   return { ...result, offset };
 }
+function bulkBasketItems(pick, kind = selectedBulkKind) {
+  const legs = kind === "CALL" ? [pick.call] : kind === "PUT" ? [pick.put] : [pick.call, pick.put];
+  return legs.map((leg) => ({
+    expiry: pick.expiry,
+    strike: Number(leg.strike),
+    optionType: leg.type,
+    lots: Number(leg.lots),
+  }));
+}
 async function addDefaultDateBaskets(day, expiry, requestId) {
+  const append = arguments[3]?.append === true,
+    replaceBulk = arguments[3]?.replaceBulk === true,
+    kind = arguments[3]?.kind || "STRANGLE";
   const offsets = [...document.querySelectorAll('input[name="basket-offset-toggle"]:checked')]
       .map((input) => Number(input.value))
       .sort((a, b) => a - b),
@@ -802,33 +837,38 @@ async function addDefaultDateBaskets(day, expiry, requestId) {
       picks.push(...batch);
       if (requestId !== dateBasketRequest) return;
     }
-    if (requestId !== dateBasketRequest || dateField.value !== day || state.baskets.length)
+    if (requestId !== dateBasketRequest || dateField.value !== day || (!append && state.baskets.length))
       return;
     const assignedColors = [];
-    state.baskets = picks.map((pick, index) => {
+    const newBaskets = picks.map((pick, index) => {
       const basket = {
-        id: `date-${day}-${pick.offset}`,
-        name: `Basket ${index + 1}`,
+        id: `date-${day}-${pick.offset}-${Date.now()}-${index}`,
+        name: `Basket ${nextBasketNumber() + index}`,
         customName: false,
         enabled: true,
         accentColor: basketAccentHex(assignedColors),
         bulkOffset: pick.offset,
-        items: [pick.call, pick.put].map((leg) => ({
-          expiry: pick.expiry,
-          strike: Number(leg.strike),
-          optionType: leg.type,
-          lots: Number(leg.lots),
-        })),
+        bulkKind: kind,
+        items: bulkBasketItems(pick, kind),
       };
       assignedColors.push(basket);
       return basket;
     });
+    if (replaceBulk) {
+      const oldBulk = state.baskets.filter((basket) => Number.isFinite(Number(basket.bulkOffset)));
+      oldBulk.forEach((basket) => delete window.basketPnlResults[basket.id]);
+      const oldIds = new Set(oldBulk.map((basket) => basket.id));
+      if (oldIds.has(window.activeScenarioBasketId)) window.activeScenarioBasketId = null;
+      state.baskets = state.baskets.filter((basket) => !oldIds.has(basket.id));
+    }
+    state.baskets.push(...newBaskets);
     state.bulkContext = {
       day,
       expiry,
       center: picks[0]?.center ?? null,
       lots: 1,
       autoCenter: true,
+      kind,
     };
     state.bulkAdderUsed = true;
     saveState();
@@ -859,7 +899,7 @@ function resetBasketsForExpiry() {
   state.baskets = [];
   state.keepEmptyOnStart = false;
   state.bulkAdderUsed = true;
-  state.bulkContext = { day, expiry, center: null, lots: 1, autoCenter: true };
+  state.bulkContext = { day, expiry, center: null, lots: 1, autoCenter: true, kind: selectedBulkKind };
   saveState();
   syncBulkCenterInput();
   syncBulkOffsetPickerFromBaskets();
@@ -955,34 +995,23 @@ document.addEventListener("click", (e) => {
     $("date-open").setAttribute("aria-expanded", "false");
   }
 });
-try {
-  const savedInterval = localStorage.getItem("pnl-price-interval");
-  if (
-    [...$("interval").options].some((option) => option.value === savedInterval)
-  ) {
-    $("interval").value = savedInterval;
-    // Refresh the custom dropdown label after restoring the persisted value.
-    $("interval").dispatchEvent(new Event("change", { bubbles: true }));
-  }
-} catch {}
-$("interval").addEventListener("change", () => {
-  try {
-    localStorage.setItem("pnl-price-interval", $("interval").value);
-  } catch {}
-  invalidateResults();
-});
 document.querySelectorAll(".chart-range-button").forEach((button) => {
   button.addEventListener("click", async () => {
     const range = button.dataset.chartRange;
     if (!["1D", "5D", "10D", "1M"].includes(range) || range === selectedChartRange) return;
-    const previousRange = selectedChartRange,
-      previousScale = CHART_RANGE_SESSION_SCALE[previousRange],
-      nextScale = CHART_RANGE_SESSION_SCALE[range],
-      checkedOffsets = [...document.querySelectorAll('input[name="basket-offset-toggle"]:checked')]
-        .map((input) => Number(input.value)),
-      scaledOffsets = checkedOffsets.map((offset) => scaleBulkOffset(offset, previousScale, nextScale));
+    clearTimeout(refreshTimer);
+    const rangeGeneration = ++requestGeneration;
     selectedChartRange = range;
-    renderBulkOffsetOptions(new Set(scaledOffsets));
+    window.basketPnlResults = {};
+    window.chartData = null;
+    window.miniChartData = null;
+    renderBulkOffsetOptions();
+    selectDefaultStrangleOffsets();
+    renderBaskets();
+    if (!$("output").hidden) {
+      $("output").classList.add("loading");
+      $("output").setAttribute("aria-busy", "true");
+    }
     const day = dateField.value,
       days = getChartSessionDays(day, range),
       rangeStart = range === "1D" ? day : days[0] || day;
@@ -994,15 +1023,12 @@ document.querySelectorAll(".chart-range-button").forEach((button) => {
     });
     window.linkedHoverTime = null;
     window.hoverIndex = null;
-    const hasBulkBaskets = state.baskets.some((basket) => Number.isFinite(Number(basket.bulkOffset))),
-      center = currentBulkCenter();
-    if (hasBulkBaskets && center !== null) {
-      await replaceBulkStranglesAtCenter(center, ++bulkCenterRequest, state.bulkContext?.autoCenter !== false, {
-        offsets: scaledOffsets,
-        replaceAllBulk: true,
-      });
+    const expiry = state.bulkContext?.expiry || $("expiry").value;
+    if (expiry && expiry >= day) {
+      const requestId = ++dateBasketRequest;
+      await addDefaultDateBaskets(day, expiry, requestId, { append: true, replaceBulk: true });
     }
-    scheduleRefresh();
+    if (rangeGeneration === requestGeneration) scheduleRefresh();
   });
 });
 const chartCanvas = $("chart");
@@ -1215,30 +1241,37 @@ function chartTouchStart(canvas, showHover) {
     showHover(event);
     // Use the hovered timestamp because the index chart remains interactive
     // when no basket series exists to provide a basket-chart index.
-    canvas.dataset.hoverCandle = String(window.hoverIndex ?? window.linkedHoverTime ?? "");
-  });
-  canvas.addEventListener("pointermove", (event) => {
-    if (!canvas.hasPointerCapture(event.pointerId)) return;
-    const pointIndex = window.hoverIndex ?? window.linkedHoverTime;
-    if (pointIndex === null || pointIndex === undefined) return;
-    const next = String(pointIndex);
-    if (next === canvas.dataset.hoverCandle) return;
-    canvas.dataset.hoverCandle = next;
-    if (event.pointerType === "touch") {
-      try {
-        navigator.vibrate?.(HAPTIC_CLICK_MS);
-      } catch {}
-    }
   });
   canvas.addEventListener("pointerup", (event) => {
     if (canvas.hasPointerCapture(event.pointerId)) {
       canvas.releasePointerCapture(event.pointerId);
-      delete canvas.dataset.hoverCandle;
     }
+    chartHapticPositions.delete(canvas);
   });
   canvas.addEventListener("pointercancel", () => {
-    delete canvas.dataset.hoverCandle;
+    chartHapticPositions.delete(canvas);
   });
+}
+function updateChartTickHaptic(canvas, event, target) {
+  if (event.pointerType !== "touch" || !canvas.hasPointerCapture(event.pointerId)) return;
+  const coordinate = chartCoordinate(target),
+    previous = chartHapticPositions.get(canvas);
+  chartHapticPositions.set(canvas, { pointerId: event.pointerId, coordinate });
+  if (!previous || previous.pointerId !== event.pointerId || previous.coordinate === coordinate)
+    return;
+  const crossedTicks = chartTimeTicks().filter((tick) => {
+    const tickCoordinate = chartCoordinate(tick);
+    return previous.coordinate < coordinate
+      ? tickCoordinate > previous.coordinate && tickCoordinate <= coordinate
+      : tickCoordinate < previous.coordinate && tickCoordinate >= coordinate;
+  }).length;
+  if (!crossedTicks) return;
+  const pattern = Array.from({ length: crossedTicks * 2 - 1 }, (_, index) =>
+    index % 2 === 0 ? HAPTIC_CLICK_MS : 8,
+  );
+  try {
+    navigator.vibrate?.(pattern.length === 1 ? HAPTIC_CLICK_MS : pattern);
+  } catch {}
 }
 const scheduleChartHover = scheduleHoverOnFrame(chartCanvas, showChartHover);
 chartCanvas.addEventListener("pointermove", scheduleChartHover);
@@ -1541,7 +1574,7 @@ function renderBaskets(options = {}) {
     .forEach((b) => {
     const index = state.baskets.indexOf(b);
     const result = window.basketPnlResults[b.id],
-      valid = result?.day === dateField.value,
+      valid = result?.day === dateField.value && result?.range === selectedChartRange,
       displayName = basketDisplayName(b);
     const toggleScenario = () => {
       const previousId = window.activeScenarioBasketId;
@@ -2263,28 +2296,47 @@ function clearBasketTransition() {
 function syncBulkOffsetPickerFromBaskets() {
   const basketOffsets = new Set(
       state.baskets
-        .map((basket) => basket.bulkOffset)
-        .filter((offset) => Number.isInteger(offset)),
+        .filter((basket) => bulkBasketKind(basket) === selectedBulkKind)
+        .map((basket) => Number(basket.bulkOffset))
+        .filter(Number.isInteger),
     );
   document.querySelectorAll('input[name="basket-offset-toggle"]').forEach((input) => {
     input.checked = basketOffsets.has(Number(input.value));
   });
 }
-function bulkOffsetConfig(range = selectedChartRange) {
-  const scale = CHART_RANGE_SESSION_SCALE[range] || 1,
-    step = marketInfo().step * scale;
-  return { min: -4 * step, max: 20 * step, step, scale };
+function bulkBasketKind(basket) {
+  return ["CALL", "PUT", "STRANGLE"].includes(basket.bulkKind)
+    ? basket.bulkKind
+    : "STRANGLE";
 }
-function scaleBulkOffset(offset, fromScale, toScale) {
-  const step = marketInfo().step * toScale,
-    min = -4 * step,
-    max = 20 * step;
-  const scaled = Math.round((offset * toScale / fromScale) / step) * step;
+function syncBulkKindPicker() {
+  document.querySelectorAll("[data-bulk-kind]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.bulkKind === selectedBulkKind));
+  });
+  const selectedLabel = selectedBulkKind === "CALL" ? "Call" : selectedBulkKind === "PUT" ? "Put" : "Strangle",
+    legend = $("basket-offset-picker")?.querySelector("legend");
+  if (legend) legend.textContent = `${selectedLabel} baskets · toggle offsets`;
+}
+async function setBulkBasketKind(kind) {
+  if (!["CALL", "PUT", "STRANGLE"].includes(kind) || kind === selectedBulkKind) return;
+  selectedBulkKind = kind;
+  localStorage.setItem(BULK_KIND_KEY, kind);
+  syncBulkKindPicker();
+  syncBulkOffsetPickerFromBaskets();
+}
+function bulkOffsetConfig(range = selectedChartRange) {
+  return BULK_OFFSET_CONFIGS[range] || BULK_OFFSET_CONFIGS["1D"];
+}
+function scaleBulkOffset(offset, fromRange, toRange) {
+  const fromScale = bulkOffsetConfig(fromRange).scale,
+    { min, max, step, scale: toScale } = bulkOffsetConfig(toRange),
+    scaled = Math.round((offset * toScale / fromScale) / step) * step;
   return Math.max(min, Math.min(max, scaled));
 }
 function renderBulkOffsetOptions(selectedOffsets = new Set()) {
   const options = $("basket-offset-options");
   if (!options) return;
+  options.classList.toggle("is-long-range", selectedChartRange !== "1D");
   const { min, max, step } = bulkOffsetConfig();
   options.replaceChildren();
   for (let offset = min; offset <= max; offset += step) {
@@ -2298,8 +2350,8 @@ function renderBulkOffsetOptions(selectedOffsets = new Set()) {
   }
 }
 function selectDefaultStrangleOffsets() {
-  const { scale, step } = bulkOffsetConfig(),
-    defaults = new Set(DEFAULT_STRANGLE_OFFSETS.map((offset) => Math.round(offset * scale / step) * step));
+  const offsetStep = selectedChartRange === "1D" ? 100 : 500,
+    defaults = new Set(Array.from({ length: 6 }, (_, index) => index * offsetStep));
   document.querySelectorAll('input[name="basket-offset-toggle"]').forEach((input) => {
     input.checked = defaults.has(Number(input.value));
   });
@@ -2397,6 +2449,7 @@ async function replaceBulkStranglesAtCenter(center, requestId, autoCenter = fals
     context = state.bulkContext || {},
     expiry = context.day === day ? context.expiry : $("expiry").value,
     lots = context.day === day ? Number(context.lots) || 1 : 1,
+    kind = options.kind || selectedBulkKind || context.kind || "STRANGLE",
     offsets = (options.offsets || [...document.querySelectorAll('input[name="basket-offset-toggle"]:checked')]
       .map((input) => Number(input.value)))
       .sort((a, b) => a - b),
@@ -2409,7 +2462,7 @@ async function replaceBulkStranglesAtCenter(center, requestId, autoCenter = fals
     removed.forEach((basket) => delete window.basketPnlResults[basket.id]);
     if (removedIds.has(window.activeScenarioBasketId)) window.activeScenarioBasketId = null;
     state.baskets = state.baskets.filter((basket) => !removedIds.has(basket.id));
-    state.bulkContext = { day, expiry, center, lots, autoCenter };
+    state.bulkContext = { day, expiry, center, lots, autoCenter, kind };
     saveState();
     syncBulkCenterInput();
     syncBulkOffsetPickerFromBaskets();
@@ -2420,7 +2473,7 @@ async function replaceBulkStranglesAtCenter(center, requestId, autoCenter = fals
     return;
   }
   if ((!offsets.length && !options.replaceAllBulk) || (!options.replaceAllBulk && currentBulkCenter() === center)) {
-    state.bulkContext = { day, expiry, center, lots, autoCenter };
+    state.bulkContext = { day, expiry, center, lots, autoCenter, kind };
     saveState();
     status.textContent = "";
     setBulkOffsetInputsDisabled(false);
@@ -2432,7 +2485,7 @@ async function replaceBulkStranglesAtCenter(center, requestId, autoCenter = fals
     setBulkOffsetInputsDisabled(false);
     return;
   }
-  status.textContent = `Updating ${offsets.length} strangles…`;
+  status.textContent = `Updating ${offsets.length} ${kind.toLowerCase()} baskets…`;
   try {
     const picks = [];
     for (let index = 0; index < offsets.length; index += 3) {
@@ -2452,7 +2505,7 @@ async function replaceBulkStranglesAtCenter(center, requestId, autoCenter = fals
       throw Error(`The selected ${marketInfo().name} center was not applied.`);
     const oldBaskets = state.baskets.filter((basket) => options.replaceAllBulk
         ? Number.isFinite(Number(basket.bulkOffset))
-        : offsets.includes(Number(basket.bulkOffset))),
+        : offsets.includes(Number(basket.bulkOffset)) && bulkBasketKind(basket) === kind),
       oldIds = oldBaskets.map((basket) => basket.id),
       oldIdSet = new Set(oldIds),
       firstBasketNumber = nextBasketNumber(),
@@ -2465,12 +2518,8 @@ async function replaceBulkStranglesAtCenter(center, requestId, autoCenter = fals
           enabled: true,
           accentColor: basketAccentHex(assignedColors),
           bulkOffset: Number(pick.offset),
-          items: [pick.call, pick.put].map((leg) => ({
-            expiry: pick.expiry,
-            strike: Number(leg.strike),
-            optionType: leg.type,
-            lots: Number(leg.lots),
-          })),
+          bulkKind: kind,
+          items: bulkBasketItems(pick, kind),
         };
         assignedColors.push(basket);
         return basket;
@@ -2479,7 +2528,7 @@ async function replaceBulkStranglesAtCenter(center, requestId, autoCenter = fals
     if (oldIdSet.has(window.activeScenarioBasketId)) window.activeScenarioBasketId = null;
     state.baskets = state.baskets.filter((basket) => !oldIdSet.has(basket.id));
     state.baskets.push(...newBaskets);
-    state.bulkContext = { day, expiry, center, lots, autoCenter };
+    state.bulkContext = { day, expiry, center, lots, autoCenter, kind };
     saveState();
     syncBulkCenterInput();
     syncBulkOffsetPickerFromBaskets();
@@ -2498,10 +2547,12 @@ async function replaceBulkStranglesAtCenter(center, requestId, autoCenter = fals
 }
 async function toggleBulkBasketOffset(input) {
   const offset = Number(input.value),
-    matches = state.baskets.filter((basket) => basket.bulkOffset === offset);
+    kind = selectedBulkKind,
+    matches = state.baskets.filter((basket) => Number(basket.bulkOffset) === offset && bulkBasketKind(basket) === kind);
   if (!input.checked) {
     if (!matches.length) return;
-    state.baskets = state.baskets.filter((basket) => basket.bulkOffset !== offset);
+    const removedIds = new Set(matches.map((basket) => basket.id));
+    state.baskets = state.baskets.filter((basket) => !removedIds.has(basket.id));
     matches.forEach((basket) => delete window.basketPnlResults[basket.id]);
     if (matches.some((basket) => basket.id === window.activeScenarioBasketId))
       window.activeScenarioBasketId = null;
@@ -2526,17 +2577,18 @@ async function toggleBulkBasketOffset(input) {
           : null,
       lots: context.day === dateField.value ? Number(context.lots) || 1 : 1,
       offset,
+      kind,
     };
   if (!request.expiry) {
     input.checked = false;
     syncBulkOffsetPickerFromBaskets();
-    showError("Choose an option expiry before adding a strangle basket.");
+    showError(`Choose an option expiry before adding a ${kind.toLowerCase()} basket.`);
     return;
   }
   input.disabled = true;
   try {
     const pick = await fetchSimpleStranglePick(request);
-    if (dateField.value !== request.day || state.baskets.some((basket) => basket.bulkOffset === offset))
+    if (dateField.value !== request.day || state.baskets.some((basket) => Number(basket.bulkOffset) === offset && bulkBasketKind(basket) === kind))
       return;
     const basket = {
       id: `basket-${Date.now()}`,
@@ -2545,12 +2597,8 @@ async function toggleBulkBasketOffset(input) {
       enabled: true,
       accentColor: nextBasketAccentColor(),
       bulkOffset: offset,
-      items: [pick.call, pick.put].map((leg) => ({
-        expiry: pick.expiry,
-        strike: Number(leg.strike),
-        optionType: leg.type,
-        lots: Number(leg.lots),
-      })),
+      bulkKind: request.kind,
+      items: bulkBasketItems(pick, request.kind),
     };
     state.baskets.push(basket);
     state.bulkAdderUsed = true;
@@ -2560,6 +2608,7 @@ async function toggleBulkBasketOffset(input) {
       center: pick.center,
       lots: request.lots,
       autoCenter: context.autoCenter !== false,
+      kind: request.kind,
     };
     saveState();
     syncBulkCenterInput();
@@ -2569,7 +2618,7 @@ async function toggleBulkBasketOffset(input) {
   } catch (error) {
     input.checked = false;
     syncBulkOffsetPickerFromBaskets();
-    showError(error.message || "Could not add the selected strangle basket.");
+    showError(error.message || `Could not add the selected ${kind.toLowerCase()} basket.`);
   } finally {
     input.disabled = false;
   }
@@ -2932,6 +2981,7 @@ function addSimpleStrangle() {
       enabled: true,
       accentColor: nextBasketAccentColor(),
       bulkOffset: Number(pick.offset),
+      bulkKind: "STRANGLE",
       items: [pick.call, pick.put].map((leg) => ({
         expiry: pick.expiry,
         strike: Number(leg.strike),
@@ -2946,6 +2996,7 @@ function addSimpleStrangle() {
     center: pick.center,
     lots: Number(pick.call.lots),
     autoCenter: false,
+    kind: "STRANGLE",
   };
   saveState();
   syncBulkCenterInput();
@@ -4033,7 +4084,15 @@ async function fetchYahooIndexDay(day, interval) {
   }
 }
 async function loadNiftyIndex(day, interval, from = day) {
-  const q = new URLSearchParams({ day, from, to: day, interval, entryTime: selectedEntryTime }),
+  const sessionDays = getChartSessionDays(day).filter((sessionDay) => sessionDay >= from),
+    q = new URLSearchParams({
+      day,
+      from,
+      to: day,
+      interval,
+      entryTime: selectedEntryTime,
+      sessions: sessionDays.join(","),
+    }),
     r = await fetch(`/api/upstox/nifty-index-history?${q}`),
     j = await r.json();
   if (!r.ok) throw Error(j.error || `Could not load ${marketInfo().name} prices.`);
@@ -4061,6 +4120,8 @@ async function loadNiftyIndex(day, interval, from = day) {
               from: sessionDay,
               to: sessionDay,
               interval,
+              sessions: sessionDay,
+              retryMissing: "true",
             }),
             response = await fetch(`/api/upstox/nifty-index-history?${query}`),
             result = await response.json();
@@ -4120,8 +4181,6 @@ async function calculatePosition(p, day, interval, from = day) {
         p.expiry,
       ),
     ]);
-  if (!daily.candles?.length)
-    throw Error(`No daily prices found for ${positionName(p)}.`);
   const dailyCandles = daily.candles
       .map((c) => ({
         t: Math.floor(new Date(c[0]).getTime() / 1000),
@@ -4166,9 +4225,9 @@ async function calculatePosition(p, day, interval, from = day) {
   if (!entry)
     throw Error(`No ${positionName(p)} price was available by ${selectedEntryTime} on ${formatDate(buyDate)}.`);
   const buy = entry.close;
-  const missingIntradayData = candles.length === 0;
-  if (missingIntradayData) {
-    // Keep the basket visible when Upstox has no intraday trades for an option;
+  const missingRangeData = candles.length === 0;
+  if (missingRangeData) {
+    // Keep the basket visible when Upstox has no candles in the selected range;
     // its price is held at the chosen entry until real candles are available.
     candles.push({ t: epoch(day) + 3 * 3600 + 45 * 60, close: buy });
   }
@@ -4183,7 +4242,7 @@ async function calculatePosition(p, day, interval, from = day) {
     buy,
     buyDate,
     buyTime: priorClose ? selectedEntryTime : time(entry.t),
-    missingIntradayData,
+    missingRangeData,
     missingPriorClose: !priorClose,
     close,
     multiplier,
@@ -4413,12 +4472,7 @@ async function loadTrade(
     ? formatDate(day)
     : `${formatDate(rangeStart)} – ${formatDate(day)}`;
   if (!statBaskets.length) {
-    await loadNiftyOnly(
-      day,
-      $("interval").value,
-      generation,
-      renderBasketCards,
-    );
+    await loadNiftyOnly(day, generation, renderBasketCards);
     return;
   }
   setChartTimeline(sessionDays);
@@ -4443,7 +4497,7 @@ async function loadTrade(
   $("empty").hidden = true;
   setChartTooltipVisible($("chart-tooltip"), false);
   try {
-    const interval = $("interval").value,
+    const interval = chartDataInterval(),
       indexPromise = loadNiftyIndex(day, interval, rangeStart)
         .then((points) => ({ points }))
         .catch((error) => ({ error: error.message }));
@@ -4529,7 +4583,7 @@ async function loadTrade(
       unavailableBaskets = basketResults.filter((result) => result.error);
     if (generation !== requestGeneration) return;
     const heldAtEntryFallback = data.some((basket) =>
-      basket.positions.some((position) => position.missingIntradayData),
+      basket.positions.some((position) => position.missingRangeData),
     ),
       missingPriorCloseFallback = data.some((basket) =>
         basket.positions.some((position) => position.missingPriorClose),
@@ -4538,13 +4592,14 @@ async function loadTrade(
       const names = unavailableBaskets
         .map((result) => basketDisplayName(result.basket))
         .join(", ");
+      const resolution = interval === "day" ? "daily" : interval.replace("minute", "-minute");
       showError(
-        `${names} could not be priced at ${interval.replace("minute", "-minute ")}resolution and were left out of the P&L charts. ${unavailableBaskets[0].error.message}${heldAtEntryFallback ? " Options with no intraday candles are held at their entry price." : ""}${missingPriorCloseFallback ? " Options without an earlier close use their first available price in the selected range." : ""}`,
+        `${names} could not be priced at ${resolution} resolution and were left out of the P&L charts. ${unavailableBaskets[0].error.message}${heldAtEntryFallback ? " Options with no candles in the selected range are held at their entry price." : ""}${missingPriorCloseFallback ? " Options without an earlier close use their first available price in the selected range." : ""}`,
       );
     } else if (heldAtEntryFallback || missingPriorCloseFallback) {
       const notes = [];
       if (heldAtEntryFallback)
-        notes.push("Options with no intraday candles are held at their entry price for the chart.");
+        notes.push("Options with no candles in the selected range are held at their entry price for the chart.");
       if (missingPriorCloseFallback)
         notes.push("Options without an earlier close use their first available price in the selected range as the P&L baseline.");
       showError(notes.join(" "));
@@ -4587,6 +4642,7 @@ async function loadTrade(
         b.id,
         {
           day,
+          range: selectedChartRange,
           ending: b.ending,
           buyValue: b.buyValue,
           closeValue: b.closeValue,
@@ -4683,11 +4739,11 @@ async function loadTrade(
 }
 async function loadNiftyOnly(
   day,
-  interval,
   generation,
   renderBasketCards = true,
 ) {
-  const sessionDays = getChartSessionDays(day),
+  const interval = chartDataInterval(),
+    sessionDays = getChartSessionDays(day),
     rangeStart = selectedChartRange === "1D" ? day : sessionDays[0] || day;
   $("dates").textContent = rangeStart === day
     ? formatDate(day)
@@ -5120,6 +5176,10 @@ function chartTimeAtFraction(fraction) {
     range.start + Math.max(0, Math.min(1, fraction)) * (range.end - range.start),
   );
 }
+function snapChartHoverTime(timestamp) {
+  const ticks = window.miniChartData?.index?.points?.map((point) => point.t) || [];
+  return ticks.length ? ticks[nearestTimeIndex(ticks, timestamp)] : timestamp;
+}
 function darkerColor(color) {
   let h, s, l;
   const hsl = color.match(
@@ -5464,9 +5524,10 @@ function showMiniHover(e) {
     if (!canvas.hasPointerCapture(e.pointerId)) return clearMiniHover();
     x = Math.max(pad.l, Math.min(rect.width - pad.r, x));
   }
-  const target = chartTimeAtFraction((x - pad.l) / pw),
+  const target = snapChartHoverTime(chartTimeAtFraction((x - pad.l) / pw)),
     i = nearestTimeIndex(times, target),
-    t = times[i];
+    t = target;
+  updateChartTickHaptic(canvas, e, target);
   const percentTip = mode === "percent" ? $("percent-tooltip") : null,
     updatePercentTooltip = mode === "percent" &&
       (i !== window.percentTooltipIndex || window.percentTooltipData !== d || percentTip.hidden);
@@ -5556,8 +5617,9 @@ function showChartHover(e) {
     x = Math.max(pad.l, Math.min(rect.width - pad.r, x));
     y = Math.max(pad.t, Math.min(rect.height - pad.b, y));
   }
-  const target = chartTimeAtFraction((x - pad.l) / pw),
+  const target = snapChartHoverTime(chartTimeAtFraction((x - pad.l) / pw)),
     i = nearestTimeIndex(d.times, target);
+  updateChartTickHaptic(chartCanvas, e, target);
   const tip = $("chart-tooltip"),
     updateTooltip = i !== window.chartTooltipIndex || window.chartTooltipData !== d || tip.hidden;
   window.chartTooltipIndex = i;
@@ -5565,7 +5627,7 @@ function showChartHover(e) {
   window.linkedHoverTime = target;
   window.hoverIndex = i;
   if (updateTooltip) {
-  $("tooltip-time").textContent = chartHoverLabel(d.times[i]);
+  $("tooltip-time").textContent = chartHoverLabel(target);
   const rows = $("tooltip-rows"),
     rowCache = pnlTooltipRows.get(rows) || new Map(),
     baskets = sortBasketInfo(d.baskets.map((basket, index) => ({ ...basket, index }))),
