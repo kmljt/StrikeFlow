@@ -1,6 +1,6 @@
 const UPSTOX_TOKEN_KEY = "strikeflow-upstox-token";
 const LAST_TRADING_DAY_KEY = "pnl-last-trading-day";
-const HAPTIC_CLICK_MS = 1;
+const HAPTIC_CLICK_MS = 2;
 const ENTRY_TIME_KEY = "strikeflow-entry-time";
 const HOVER_NUMBER_FORMAT = new Intl.NumberFormat("en-IN", {
   minimumFractionDigits: 2,
@@ -563,6 +563,7 @@ $("site-accent").addEventListener("input", () => {
   if (window.miniChartData) drawMiniPlots(window.miniChartData);
 });
 window.hoverIndex = null;
+window.chartCrosshairTime = null;
 window.miniHover = null;
 window.basketPnlResults = {};
 window.activeScenarioBasketId = null;
@@ -1022,6 +1023,7 @@ document.querySelectorAll(".chart-range-button").forEach((button) => {
       option.setAttribute("aria-pressed", String(option === button));
     });
     window.linkedHoverTime = null;
+    window.chartCrosshairTime = null;
     window.hoverIndex = null;
     const expiry = state.bulkContext?.expiry || $("expiry").value;
     if (expiry && expiry >= day) {
@@ -5159,6 +5161,28 @@ function chartX(t, p, w) {
   if (!r || r.end <= r.start) return p.l;
   return p.l + ((w - p.l - p.r) * (chartCoordinate(t) - r.start)) / (r.end - r.start);
 }
+function drawDaySeparators(ctx, p, w, bottom) {
+  const days = window.chartSessionDays || [],
+    range = window.chartCoordinateRange;
+  if (days.length < 2 || !range || range.end <= range.start) return;
+  ctx.save();
+  ctx.strokeStyle = getComputedStyle(document.documentElement)
+    .getPropertyValue("--site-accent")
+    .trim() || "#75808a";
+  ctx.globalAlpha = 0.24;
+  ctx.lineWidth = 1.25;
+  ctx.setLineDash([3, 5]);
+  for (let day = 1; day < days.length; day++) {
+    const coordinate = day * 390;
+    if (coordinate <= range.start || coordinate >= range.end) continue;
+    const x = p.l + ((w - p.l - p.r) * (coordinate - range.start)) / (range.end - range.start);
+    ctx.beginPath();
+    ctx.moveTo(x, p.t);
+    ctx.lineTo(x, bottom);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 function chartTickLabel(timestamp) {
   if ((window.chartSessionDays || []).length <= 1) return time(timestamp);
   return new Intl.DateTimeFormat("en-GB", {
@@ -5337,6 +5361,7 @@ function drawNiftyPlot(canvas, points, previousClose) {
     ctx.fillStyle = "#77818a";
     ctx.fillText(Math.round(value).toLocaleString("en-IN"), p.l - 8, y);
   }
+  drawDaySeparators(ctx, p, w, h - p.b);
   ctx.save();
   ctx.setLineDash([5, 6]);
   ctx.strokeStyle = "#7f898f88";
@@ -5383,8 +5408,9 @@ function drawNiftyPlot(canvas, points, previousClose) {
       ? -1
       : nearestTimeIndex(pointTimes, window.linkedHoverTime);
     if (i < 0) return;
-    const hoverX = chartX(window.linkedHoverTime, p, w),
-      hoverValue = interpolateAtChartTime(pointTimes, values, window.linkedHoverTime),
+    const crosshairTime = window.chartCrosshairTime ?? window.linkedHoverTime,
+      hoverX = chartX(crosshairTime, p, w),
+      hoverValue = interpolateAtChartTime(pointTimes, values, crosshairTime),
       y = Y(hoverValue);
     drawHoverCrosshair(ctx, hoverX, p.t, h - p.b);
     drawHoverMarker(ctx, hoverX, y, hoverValue >= baseline ? green : red);
@@ -5467,6 +5493,7 @@ function drawMiniPlot(canvas, times, series, mode) {
       y,
     );
   }
+  drawDaySeparators(ctx, p, w, h - p.b);
   if (mode === "percent" && min < 0 && max > 0) {
     ctx.strokeStyle = "#59616a";
     ctx.beginPath();
@@ -5482,10 +5509,11 @@ function drawMiniPlot(canvas, times, series, mode) {
     ctx.fillText(chartTickLabel(t), chartX(t, p, w), h - p.b + 8);
   const drawOverlay = () => {
     if (window.linkedHoverTime == null) return;
-    const hoverX = chartX(window.linkedHoverTime, p, w);
+    const crosshairTime = window.chartCrosshairTime ?? window.linkedHoverTime,
+      hoverX = chartX(crosshairTime, p, w);
     drawHoverCrosshair(ctx, hoverX, p.t, h - p.b);
     series.forEach((s) => {
-      const hoverValue = interpolateAtChartTime(times, s.values, window.linkedHoverTime);
+      const hoverValue = interpolateAtChartTime(times, s.values, crosshairTime);
       drawHoverMarker(ctx, hoverX, Y(hoverValue), s.color);
     });
   };
@@ -5524,10 +5552,11 @@ function showMiniHover(e) {
     if (!canvas.hasPointerCapture(e.pointerId)) return clearMiniHover();
     x = Math.max(pad.l, Math.min(rect.width - pad.r, x));
   }
-  const target = snapChartHoverTime(chartTimeAtFraction((x - pad.l) / pw)),
+  const crosshairTime = chartTimeAtFraction((x - pad.l) / pw),
+    target = snapChartHoverTime(crosshairTime),
     i = nearestTimeIndex(times, target),
     t = target;
-  updateChartTickHaptic(canvas, e, target);
+  updateChartTickHaptic(canvas, e, crosshairTime);
   const percentTip = mode === "percent" ? $("percent-tooltip") : null,
     updatePercentTooltip = mode === "percent" &&
       (i !== window.percentTooltipIndex || window.percentTooltipData !== d || percentTip.hidden);
@@ -5536,6 +5565,7 @@ function showMiniHover(e) {
     window.percentTooltipData = d;
   }
   window.linkedHoverTime = target;
+  window.chartCrosshairTime = crosshairTime;
   window.hoverIndex = i;
   if (mode === "percent") {
     const tip = percentTip,
@@ -5584,6 +5614,7 @@ function showMiniHover(e) {
 }
 function clearMiniHover() {
   window.linkedHoverTime = null;
+  window.chartCrosshairTime = null;
   window.hoverIndex = null;
   setChartTooltipVisible($("percent-tooltip"), false);
   setChartTooltipVisible($("chart-tooltip"), false);
@@ -5617,14 +5648,16 @@ function showChartHover(e) {
     x = Math.max(pad.l, Math.min(rect.width - pad.r, x));
     y = Math.max(pad.t, Math.min(rect.height - pad.b, y));
   }
-  const target = snapChartHoverTime(chartTimeAtFraction((x - pad.l) / pw)),
+  const crosshairTime = chartTimeAtFraction((x - pad.l) / pw),
+    target = snapChartHoverTime(crosshairTime),
     i = nearestTimeIndex(d.times, target);
-  updateChartTickHaptic(chartCanvas, e, target);
+  updateChartTickHaptic(chartCanvas, e, crosshairTime);
   const tip = $("chart-tooltip"),
     updateTooltip = i !== window.chartTooltipIndex || window.chartTooltipData !== d || tip.hidden;
   window.chartTooltipIndex = i;
   window.chartTooltipData = d;
   window.linkedHoverTime = target;
+  window.chartCrosshairTime = crosshairTime;
   window.hoverIndex = i;
   if (updateTooltip) {
   $("tooltip-time").textContent = chartHoverLabel(target);
@@ -5680,6 +5713,7 @@ function showChartHover(e) {
 }
 function clearChartHover() {
   window.linkedHoverTime = null;
+  window.chartCrosshairTime = null;
   window.hoverIndex = null;
   setChartTooltipVisible($("chart-tooltip"), false);
   if (window.chartData) draw(window.chartData);
@@ -5722,6 +5756,7 @@ function draw(d) {
     ctx.fillStyle = "#829087";
     ctx.fillText(Math.round(v).toLocaleString("en-IN"), p.l - 8, y);
   }
+  drawDaySeparators(ctx, p, w, h - p.b);
   if (min < 0 && max > 0) {
     ctx.strokeStyle = "#778078";
     ctx.beginPath();
@@ -5749,13 +5784,14 @@ function draw(d) {
   );
   const drawOverlay = () => {
     if (window.hoverIndex == null) return;
-    const hoverX = chartX(window.linkedHoverTime, p, w);
+    const crosshairTime = window.chartCrosshairTime ?? window.linkedHoverTime,
+      hoverX = chartX(crosshairTime, p, w);
     drawHoverCrosshair(ctx, hoverX, p.t, h - p.b);
     d.baskets.forEach((basket, index) => {
       const hoverValue = interpolateAtChartTime(
         d.times,
         seriesByBasket[index],
-        window.linkedHoverTime,
+        crosshairTime,
       );
       drawHoverMarker(ctx, hoverX, Y(hoverValue), basket.color);
     });
