@@ -1254,25 +1254,15 @@ function chartTouchStart(canvas, showHover) {
     chartHapticPositions.delete(canvas);
   });
 }
-function updateChartTickHaptic(canvas, event, target) {
+function updateChartTickHaptic(canvas, event, target, times) {
   if (event.pointerType !== "touch" || !canvas.hasPointerCapture(event.pointerId)) return;
-  const coordinate = chartCoordinate(target),
+  const tickIndex = nearestTimeIndex(times, target),
     previous = chartHapticPositions.get(canvas);
-  chartHapticPositions.set(canvas, { pointerId: event.pointerId, coordinate });
-  if (!previous || previous.pointerId !== event.pointerId || previous.coordinate === coordinate)
+  chartHapticPositions.set(canvas, { pointerId: event.pointerId, tickIndex });
+  if (!previous || previous.pointerId !== event.pointerId || previous.tickIndex === tickIndex)
     return;
-  const crossedTicks = chartTimeTicks().filter((tick) => {
-    const tickCoordinate = chartCoordinate(tick);
-    return previous.coordinate < coordinate
-      ? tickCoordinate > previous.coordinate && tickCoordinate <= coordinate
-      : tickCoordinate < previous.coordinate && tickCoordinate >= coordinate;
-  }).length;
-  if (!crossedTicks) return;
-  const pattern = Array.from({ length: crossedTicks * 2 - 1 }, (_, index) =>
-    index % 2 === 0 ? HAPTIC_CLICK_MS : 8,
-  );
   try {
-    navigator.vibrate?.(pattern.length === 1 ? HAPTIC_CLICK_MS : pattern);
+    navigator.vibrate?.(HAPTIC_CLICK_MS);
   } catch {}
 }
 const scheduleChartHover = scheduleHoverOnFrame(chartCanvas, showChartHover);
@@ -5662,7 +5652,7 @@ function showMiniHover(e) {
     target = snapChartHoverTime(crosshairTime),
     i = nearestTimeIndex(times, target),
     t = target;
-  updateChartTickHaptic(canvas, e, crosshairTime);
+  updateChartTickHaptic(canvas, e, target, times);
   const percentTip = mode === "percent" ? $("percent-tooltip") : null,
     updatePercentTooltip = mode === "percent" &&
       (i !== window.percentTooltipIndex || window.percentTooltipData !== d || percentTip.hidden);
@@ -5757,7 +5747,7 @@ function showChartHover(e) {
   const crosshairTime = chartTimeAtFraction((x - pad.l) / pw),
     target = snapChartHoverTime(crosshairTime),
     i = nearestTimeIndex(d.times, target);
-  updateChartTickHaptic(chartCanvas, e, crosshairTime);
+  updateChartTickHaptic(chartCanvas, e, target, d.times);
   const tip = $("chart-tooltip"),
     updateTooltip = i !== window.chartTooltipIndex || window.chartTooltipData !== d || tip.hidden;
   window.chartTooltipIndex = i;
