@@ -4,6 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="theme-color" content="#000000" />
+    <meta name="application-name" content="StrikeFlow" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="StrikeFlow" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <title>StrikeFlow · NSE Options P&amp;L</title>
     <style>
       :root {
@@ -4376,6 +4383,15 @@
         >
       </div>
     </main>
-    <script src="app.js?v=automatic-chart-range-v2"></script>
+    <script src="app.js?v=smooth-basket-refresh-v1"></script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/service-worker.js").catch((error) => {
+            console.warn("StrikeFlow offline support could not start.", error);
+          });
+        });
+      }
+    </script>
   </body>
 </html>

@@ -1,6 +1,6 @@
 const UPSTOX_TOKEN_KEY = "strikeflow-upstox-token";
 const LAST_TRADING_DAY_KEY = "pnl-last-trading-day";
-const HAPTIC_CLICK_MS = 2;
+const HAPTIC_CLICK_MS = 12;
 const ENTRY_TIME_KEY = "strikeflow-entry-time";
 const HOVER_NUMBER_FORMAT = new Intl.NumberFormat("en-IN", {
   minimumFractionDigits: 2,
@@ -1452,15 +1452,113 @@ function scheduleRefresh({ renderBasketCards = true } = {}) {
     250,
   );
 }
-function renderRefreshedBaskets(mode) {
-  if (mode === false) return;
-  renderBaskets(
-    typeof mode === "string"
-      ? { onlyBasketId: mode }
-      : Array.isArray(mode)
-        ? { onlyBasketIds: mode }
-        : undefined,
-  );
+function refreshBasketCardValues(card, basket, index) {
+  const result = window.basketPnlResults[basket.id],
+    valid = result?.day === dateField.value && result?.range === selectedChartRange;
+  card.style.setProperty("--basket-color", basketColor(index, valid ? result.ending : 0, basket.accentColor));
+  const pnl = card.querySelector("[data-basket-pnl]");
+  if (pnl) {
+    const text = valid ? signed(result.ending) : "—";
+    pnl.replaceChildren(...[...text].map((char) => {
+      if (!["+", "₹", ".", ","].includes(char)) return document.createTextNode(char);
+      const glyph = document.createElement("span");
+      glyph.className = "basket-head-raised-glyph";
+      glyph.textContent = char;
+      return glyph;
+    }));
+    pnl.classList.toggle("green", valid && result.ending > 0);
+    pnl.classList.toggle("red", valid && result.ending < 0);
+  }
+  card.querySelectorAll(".basket-metrics [data-value]").forEach((value) => {
+    const metric = value.dataset.value;
+    value.textContent = !valid ? "—" : metric === "cost" ? money(result.buyValue) : metric === "value" ? money(result.closeValue) : percentChange(result.buyValue, result.closeValue);
+    value.classList.toggle("green", valid && metric === "change" && result.percent > 0);
+    value.classList.toggle("red", valid && metric === "change" && result.percent < 0);
+  });
+  const stats = valid ? result.stats || intradayStats(result.points) : null,
+    cost = valid ? Number(result.buyValue) || 0 : 0,
+    fromClose = (change) => stats && cost > 0 ? percentChange(cost, cost + change) : "—",
+    between = (from, to) => stats && cost > 0 && cost + from > 0 ? percentChange(cost + from, cost + to) : "—",
+    performance = {
+      "max-profit": [stats ? signed(stats.maxProfit.value) : "—", stats?.maxProfit.t ? time(stats.maxProfit.t) : "", stats?.maxProfit.value > 0 ? "green" : "", stats?.maxProfit.t ? fromClose(stats.maxProfit.value) : "—"],
+      "max-loss": [stats ? stats.maxLoss.value < 0 ? signed(stats.maxLoss.value) : "−" + money(0) : "—", stats?.maxLoss.t ? time(stats.maxLoss.t) : "", stats?.maxLoss.value < 0 ? "red" : "", stats?.maxLoss.t ? fromClose(stats.maxLoss.value) : "—"],
+      "best-recovery": [stats ? signed(stats.maxDrawup.value) : "—", stats?.maxDrawup.to ? (stats.maxDrawup.from ? time(stats.maxDrawup.from) : "Open") + "–" + time(stats.maxDrawup.to) : "", stats?.maxDrawup.value > 0 ? "green" : "", stats?.maxDrawup.to ? between(stats.maxDrawup.fromPnl, stats.maxDrawup.toPnl) : "—"],
+      "largest-decline": [stats ? "−" + money(stats.maxDrawdown.value) : "—", stats?.maxDrawdown.to ? (stats.maxDrawdown.from ? time(stats.maxDrawdown.from) : "Open") + "–" + time(stats.maxDrawdown.to) : "", stats?.maxDrawdown.value > 0 ? "red" : "", stats?.maxDrawdown.to ? between(stats.maxDrawdown.fromPnl, stats.maxDrawdown.toPnl) : "—"],
+    };
+  card.querySelectorAll(".performance-stat[data-metric]").forEach((item) => {
+    const values = performance[item.dataset.metric];
+    if (!values) return;
+    const amount = item.querySelector(".performance-stat-value strong"),
+      change = item.querySelector(".performance-change"),
+      note = item.querySelector("small"),
+      basis = item.dataset.metric === "max-profit" || item.dataset.metric === "max-loss" ? "relative to " + selectedEntryTime + " previous-session entry" : "across the displayed intraday interval";
+    amount.textContent = values[0];
+    amount.classList.toggle("green", values[2] === "green");
+    amount.classList.toggle("red", values[2] === "red");
+    change.textContent = values[3];
+    change.classList.toggle("green", values[3].startsWith("+"));
+    change.classList.toggle("red", values[3].startsWith("−") || values[3].startsWith("-"));
+    change.title = "Percentage change " + basis;
+    change.setAttribute("aria-label", values[3] + " percentage change " + basis);
+    note.textContent = values[1];
+  });
+  card.querySelectorAll(".basket-item[data-position-index]").forEach((row) => {
+    const positionIndex = Number(row.dataset.positionIndex),
+      position = basket.items[positionIndex],
+      item = valid ? result.positions.find((entry) => entry.index === positionIndex) : null,
+      prices = row.querySelector(".instrument-detail > span"),
+      change = row.querySelector(".instrument-detail > strong"),
+      totals = row.querySelectorAll(".position-total strong");
+    if (!position) return;
+    if (!item) {
+      prices.textContent = "— → —";
+      prices.setAttribute("aria-label", "Prices updating");
+      prices.removeAttribute("title");
+      change.textContent = "—";
+      change.className = "";
+      totals.forEach((total) => { total.textContent = "—"; total.className = ""; });
+      return;
+    }
+    const price = money(item.buy) + " → " + money(item.close),
+      tone = item.ending > 0 ? "green" : item.ending < 0 ? "red" : "";
+    prices.textContent = price;
+    prices.setAttribute("aria-label", "Previous close " + money(item.buy) + "; today close " + money(item.close));
+    prices.title = "Previous close " + money(item.buy) + " · Today close " + money(item.close);
+    change.textContent = percentChange(item.buy, item.close);
+    change.className = tone;
+    [money(item.buy * item.multiplier), money(item.close * item.multiplier), signed(item.ending)].forEach((text, i) => {
+      totals[i].textContent = text;
+      totals[i].className = i === 2 ? tone : "";
+    });
+  });
+  const structure = card.querySelector(".basket-structure"),
+    structureValues = structure?.querySelectorAll(".basket-structure-value"),
+    reference = valid ? Number(result.scenario?.previousClose) : NaN;
+  if (structureValues?.length >= 3) {
+    const call = basket.items.find((item) => item.optionType === "CE"),
+      put = basket.items.find((item) => item.optionType === "PE"),
+      offsets = [reference - Number(put?.strike), Number(call?.strike) - reference];
+    offsets.forEach((offset, i) => {
+      const value = structureValues[i],
+        tone = !Number.isFinite(offset) || offset === 0 ? "is-neutral" : offset > 0 ? "is-otm" : "is-profit",
+        metric = value.closest(".basket-structure-item");
+      value.textContent = Number.isFinite(offset) ? offset === 0 ? "ATM" : Math.abs(Math.round(offset)).toLocaleString("en-IN") + " " + (offset > 0 ? "OTM" : "ITM") : "—";
+      metric.classList.remove("is-neutral", "is-otm", "is-profit");
+      metric.classList.add(tone);
+    });
+    const basis = structure.querySelector(".basket-structure-reference");
+    basis.textContent = Number.isFinite(reference) ? marketInfo().name + " entry reference · " + selectedEntryTime + " · ₹" + reference.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : marketInfo().name + " entry reference unavailable";
+  }
+}
+function renderRefreshedBaskets() {
+  const order = new Map(sortBasketInfo(state.baskets).map((basket, index) => [basket.id, index]));
+  $("baskets").querySelectorAll(".basket[data-basket-id]").forEach((card) => {
+    const basket = state.baskets.find((item) => item.id === card.dataset.basketId);
+    if (basket) refreshBasketCardValues(card, basket, order.get(basket.id) ?? 0);
+  });
+  const active = state.baskets.find((basket) => basket.id === window.activeScenarioBasketId);
+  if (active && $("baskets").querySelector(".basket[data-basket-id='" + active.id + "'] .scenario-panel:not([hidden])"))
+    renderBaskets({ onlyBasketId: active.id });
 }
 function percentChange(from, to) {
   return from
@@ -1629,6 +1727,7 @@ function renderBaskets(options = {}) {
     pnlLabel.textContent = "P&L";
     pnlLabel.style.cssText = "font-size:11px;color:#89958e;margin-left:8px";
     const pnl = document.createElement("strong");
+    pnl.dataset.basketPnl = "true";
     pnl.style.cssText = "font-size:14px;white-space:nowrap";
     const pnlText = valid ? signed(result.ending) : "—";
     pnl.replaceChildren(...[...pnlText].map((char) => {
@@ -1825,6 +1924,7 @@ function renderBaskets(options = {}) {
       const caption = document.createElement("span");
       caption.textContent = label;
       const val = document.createElement("strong");
+      val.dataset.value = label.toLowerCase();
       val.textContent = value;
       if (label === "Change" && valid && result.percent !== 0)
         val.className = result.percent > 0 ? "green" : "red";
@@ -1833,7 +1933,7 @@ function renderBaskets(options = {}) {
     }
     const performance = document.createElement("div");
     performance.className = "basket-performance";
-    const stats = valid ? intradayStats(result.points) : null,
+    const stats = valid ? result.stats || intradayStats(result.points) : null,
       costBasis = valid ? Number(result.buyValue) || 0 : 0,
       percentFromPreviousClose = (change) =>
         stats && costBasis > 0
@@ -1932,6 +2032,7 @@ function renderBaskets(options = {}) {
     b.items.forEach((position, i) => {
       const row = document.createElement("div");
       row.className = "basket-item";
+      row.dataset.positionIndex = String(i);
       const optionToggle = document.createElement("input");
       optionToggle.type = "checkbox";
       optionToggle.className = "selection-check";
@@ -2144,6 +2245,7 @@ function renderBaskets(options = {}) {
         };
         window.scenarioChartRefs.push(ref);
         addScenarioControls(controls, ref);
+        const scheduleScenarioHover = scheduleHoverOnFrame(canvas, (event) => showScenarioHover(event, ref));
         canvas.addEventListener("pointerdown", (e) => {
           if (e.button !== 0) return;
           if (e.pointerType === "touch") {
@@ -2179,9 +2281,10 @@ function renderBaskets(options = {}) {
             );
             return;
           }
-          showScenarioHover(e, ref);
+          scheduleScenarioHover(e);
         });
         canvas.addEventListener("pointerup", (e) => {
+          scheduleScenarioHover.cancel();
           ref.drag = null;
           canvas.classList.remove("is-panning");
           delete canvas.dataset.hoverSpot;
@@ -2189,6 +2292,7 @@ function renderBaskets(options = {}) {
             canvas.releasePointerCapture(e.pointerId);
         });
         canvas.addEventListener("pointercancel", () => {
+          scheduleScenarioHover.cancel();
           ref.drag = null;
           canvas.classList.remove("is-panning");
           delete canvas.dataset.hoverSpot;
@@ -2208,6 +2312,7 @@ function renderBaskets(options = {}) {
           { passive: false },
         );
         canvas.addEventListener("pointerleave", () => {
+          scheduleScenarioHover.cancel();
           if (ref.drag || canvas.dataset.hoverSpot !== undefined) return;
           ref.hoverPoint = null;
           tooltip.hidden = true;
@@ -4651,6 +4756,7 @@ async function loadTrade(
           percent: b.percent,
           positions: b.positions,
           points: b.points,
+          stats: intradayStats(b.points),
           scenario: b.scenario,
         },
       ]),
@@ -4905,10 +5011,10 @@ function drawScenarioChart(
   const box = canvas.getBoundingClientRect(),
     ratio = devicePixelRatio || 1;
   if (!box.width || !box.height || !scenario?.points?.length) return;
-  canvas.width = box.width * ratio;
-  canvas.height = box.height * ratio;
+  if (canvas.width !== box.width * ratio) canvas.width = box.width * ratio;
+  if (canvas.height !== box.height * ratio) canvas.height = box.height * ratio;
   const ctx = canvas.getContext("2d");
-  ctx.scale(ratio, ratio);
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   const w = box.width,
     h = box.height,
     p = { l: 80, r: 14, t: 14, b: 30 },

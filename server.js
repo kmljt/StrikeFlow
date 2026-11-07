@@ -1089,6 +1089,10 @@ async function routeRequest(req, res) {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css",
     ".js": "text/javascript",
+    ".webmanifest": "application/manifest+json; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
   };
   res.writeHead(200, {
     "content-type": types[path.extname(file)] || "text/plain",
