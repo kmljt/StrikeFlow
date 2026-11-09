@@ -1,4 +1,4 @@
-const CACHE_NAME = "strikeflow-shell-v1";
+const CACHE_NAME = "strikeflow-shell-v9";
 const APP_SHELL = [
   "/",
   "/index.html",

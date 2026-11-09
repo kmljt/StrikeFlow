@@ -2133,8 +2133,10 @@
         text-overflow: ellipsis;
       }
       .performance-stat > small {
-        color: #727b83;
-        font-size: 9px;
+        color: #929ba5;
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.01em;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -2177,8 +2179,10 @@
         text-overflow: ellipsis;
       }
       .performance-stat > small {
-        color: #727b83;
-        font-size: 9px;
+        color: #929ba5;
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.01em;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -3925,6 +3929,8 @@
       .index-quote-details{display:grid;justify-items:end;gap:2px;flex:0 0 auto;text-align:right;font-variant-numeric:tabular-nums}
       .index-quote-change{font-size:13px;font-weight:740;line-height:1.15;white-space:nowrap}
       .index-quote-time{color:#858e97;font-size:10px;font-weight:580;line-height:1.2;white-space:nowrap}
+      .index-quote-time .odometer-digit{position:relative;top:2px}
+      .index-quote-time-month{position:relative;top:2px;display:inline-block;width:2.15em;height:1em;overflow:hidden;vertical-align:baseline;text-align:left}
       .index-quote-change.green{color:var(--green)}
       .index-quote-change.red{color:var(--red)}
       .odometer-digit{display:inline-block;width:.59em;height:1em;overflow:hidden;line-height:1em;text-align:center}
@@ -3936,11 +3942,13 @@
       .basket-head strong .odometer-sign,.basket-head strong .odometer-currency,.basket-head strong .odometer-decimal,.basket-head strong .odometer-comma{position:relative;top:-2px}
       .chart-tooltip .tooltip-basket-value .odometer-sign,.chart-tooltip .tooltip-basket-value .odometer-currency,.chart-tooltip .tooltip-basket-value .odometer-decimal,.chart-tooltip .tooltip-basket-value .odometer-comma,
       .chart-tooltip .tooltip-basket-change .odometer-sign,.chart-tooltip .tooltip-basket-change .odometer-currency,.chart-tooltip .tooltip-basket-change .odometer-decimal,.chart-tooltip .tooltip-basket-change .odometer-comma,.chart-tooltip .tooltip-basket-change .odometer-percent{position:relative;top:-2px}
-      .basket-head .basket-head-raised-glyph{position:relative;top:-2px}
+      .basket-head .basket-head-raised-glyph{position:relative;top:0}
       .tooltip-basket-percent,.tooltip-basket-change{display:inline-flex;align-items:center;justify-content:flex-end;min-height:1em;line-height:1;font-variant-numeric:tabular-nums lining-nums;white-space:nowrap}
       .tooltip-basket-value>b,.tooltip-basket-value>small{box-sizing:border-box;width:100%;white-space:nowrap;font-variant-numeric:tabular-nums lining-nums}
       .quote-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
       @media(max-width:520px){.index-quote-readout{align-items:flex-end;gap:7px}.index-quote-price{font-size:clamp(21px,7vw,28px)}.index-quote-change{font-size:12px}.index-quote-time{font-size:9px}}
+      @supports (content-visibility:auto){.basket{content-visibility:auto;contain-intrinsic-size:auto 620px}}
+      @media(max-width:620px) and (pointer:coarse){.basket-head-actions .icon-action{width:36px;height:36px;min-width:36px;min-height:36px;flex-basis:36px}.basket-head-actions .basket-color-picker{width:32px;height:32px;flex-basis:32px}.basket-head-actions .basket-random-color{width:32px;height:32px}.lot-size-button{width:36px;height:36px}}
     </style>
   </head>
   <body>
@@ -4131,7 +4139,7 @@
             ＋ Add Strangle
           </button>
           <button id="bulk-add-strangles" class="button secondary" type="button" aria-expanded="false">
-            Bulk Add
+            Bulk Add Baskets
           </button>
           <button id="clear-baskets" class="button secondary" type="button" hidden>
             Clear all baskets
@@ -4383,7 +4391,7 @@
         >
       </div>
     </main>
-    <script src="app.js?v=smooth-basket-refresh-v1"></script>
+    <script src="app.js?v=mobile-performance-v1"></script>
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {

@@ -2,9 +2,30 @@ const UPSTOX_TOKEN_KEY = "strikeflow-upstox-token";
 const LAST_TRADING_DAY_KEY = "pnl-last-trading-day";
 const HAPTIC_CLICK_MS = 1;
 const ENTRY_TIME_KEY = "strikeflow-entry-time";
-const HOVER_NUMBER_FORMAT = new Intl.NumberFormat("en-IN", {
+const MONEY_NUMBER_FORMAT = new Intl.NumberFormat("en-IN", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
+});
+const CENTER_NUMBER_FORMAT = new Intl.NumberFormat("en-IN", {
+  maximumFractionDigits: 2,
+});
+const DATE_FORMAT = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
+});
+const DATE_SHORT_FORMAT = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric", month: "short", timeZone: "UTC",
+});
+const DATE_SHORT_IN_FORMAT = new Intl.DateTimeFormat("en-IN", {
+  day: "numeric", month: "short", timeZone: "UTC",
+});
+const DATE_FULL_IN_FORMAT = new Intl.DateTimeFormat("en-IN", {
+  day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
+});
+const WEEKDAY_FORMAT = new Intl.DateTimeFormat("en-GB", {
+  weekday: "long", timeZone: "UTC",
+});
+const MONTH_YEAR_FORMAT = new Intl.DateTimeFormat("en-IN", {
+  month: "long", year: "numeric", timeZone: "UTC",
 });
 const BULK_OFFSET_CONFIGS = {
   "1D": { min: -200, max: 1000, step: 50, scale: 1 },
@@ -93,10 +114,20 @@ function setChartTimeline(days) {
   window.chartCoordinateRange = { start: 0, end: Math.max(1, days.length) * 390 };
 }
 function setChartXDomain(times) {
-  const coordinates = times.filter(Number.isFinite).map(chartCoordinate);
-  if (coordinates.length) {
-    const start = Math.min(...coordinates),
-      end = Math.max(...coordinates);
+  let start = Infinity, lastCoordinate = -Infinity, lastTime = -Infinity;
+  for (const timestamp of times) {
+    if (!Number.isFinite(timestamp)) continue;
+    const coordinate = chartCoordinate(timestamp);
+    start = Math.min(start, coordinate);
+    lastCoordinate = Math.max(lastCoordinate, coordinate);
+    lastTime = Math.max(lastTime, timestamp);
+  }
+  if (Number.isFinite(start)) {
+    const lastDayIndex = window.chartSessionLookup?.get(istDay(lastTime)),
+      lastLocalMinute = ((Math.floor(lastTime / 60) % 1440) + 330) % 1440,
+      end = lastLocalMinute >= 15 * 60 + 30 && Number.isInteger(lastDayIndex)
+        ? Math.max(lastCoordinate, (lastDayIndex + 1) * 390 - 0.01)
+        : lastCoordinate;
     window.chartCoordinateRange = {
       start,
       end: end > start ? end : start + 1,
@@ -758,7 +789,7 @@ dateField.addEventListener("change", () => {
   window.basketPnlResults = {};
   window.chartData = null;
   window.miniChartData = null;
-  showBasketTransition("Building default strangles…", previousBasketHeight);
+  showBasketTransition("Building default baskets…", previousBasketHeight);
   if (!$("output").hidden) {
     $("output").classList.add("loading");
     $("output").setAttribute("aria-busy", "true");
@@ -823,7 +854,8 @@ function bulkBasketItems(pick, kind = selectedBulkKind) {
 async function addDefaultDateBaskets(day, expiry, requestId) {
   const append = arguments[3]?.append === true,
     replaceBulk = arguments[3]?.replaceBulk === true,
-    kind = arguments[3]?.kind || "STRANGLE";
+    kind = arguments[3]?.kind || "STRANGLE",
+    kinds = selectedChartRange === "1D" ? [kind] : ["CALL", "PUT", "STRANGLE"];
   const offsets = [...document.querySelectorAll('input[name="basket-offset-toggle"]:checked')]
       .map((input) => Number(input.value))
       .sort((a, b) => a - b),
@@ -840,21 +872,26 @@ async function addDefaultDateBaskets(day, expiry, requestId) {
     }
     if (requestId !== dateBasketRequest || dateField.value !== day || (!append && state.baskets.length))
       return;
-    const assignedColors = [];
-    const newBaskets = picks.map((pick, index) => {
-      const basket = {
-        id: `date-${day}-${pick.offset}-${Date.now()}-${index}`,
-        name: `Basket ${nextBasketNumber() + index}`,
-        customName: false,
-        enabled: true,
-        accentColor: basketAccentHex(assignedColors),
-        bulkOffset: pick.offset,
-        bulkKind: kind,
-        items: bulkBasketItems(pick, kind),
-      };
-      assignedColors.push(basket);
-      return basket;
-    });
+    const assignedColors = [],
+      firstBasketNumber = nextBasketNumber(),
+      createdAt = Date.now(),
+      newBaskets = picks.flatMap((pick, pickIndex) =>
+        kinds.map((basketKind, kindIndex) => {
+          const basket = {
+            id: `date-${day}-${pick.offset}-${basketKind}-${createdAt}-${pickIndex}-${kindIndex}`,
+            name: `Basket ${firstBasketNumber + pickIndex * kinds.length + kindIndex}`,
+            customName: false,
+            enabled: true,
+            accentColor: basketAccentHex(assignedColors),
+            bulkCenter: Number(pick.center),
+            bulkOffset: pick.offset,
+            bulkKind: basketKind,
+            items: bulkBasketItems(pick, basketKind),
+          };
+          assignedColors.push(basket);
+          return basket;
+        }),
+      );
     if (replaceBulk) {
       const oldBulk = state.baskets.filter((basket) => Number.isFinite(Number(basket.bulkOffset)));
       oldBulk.forEach((basket) => delete window.basketPnlResults[basket.id]);
@@ -883,7 +920,7 @@ async function addDefaultDateBaskets(day, expiry, requestId) {
       clearBasketTransition();
       $("baskets").replaceChildren();
       syncBulkOffsetPickerFromBaskets();
-      showError(error.message || "Could not add the default strangles for this date.");
+      showError(error.message || "Could not add the default baskets for this date.");
       scheduleRefresh();
     }
   }
@@ -910,7 +947,7 @@ function resetBasketsForExpiry() {
   window.basketPnlResults = {};
   window.chartData = null;
   window.miniChartData = null;
-  showBasketTransition("Building default strangles…", previousBasketHeight);
+  showBasketTransition("Building default baskets…", previousBasketHeight);
   if (!$("output").hidden) {
     $("output").classList.add("loading");
     $("output").setAttribute("aria-busy", "true");
@@ -1087,15 +1124,18 @@ function savePlotBase(canvas, keys, box, ratio, drawOverlay) {
 const pnlTooltipRows = new WeakMap();
 const percentTooltipRows = new WeakMap();
 const odometerCells = new WeakMap(),
-  odometerMotion = new WeakMap();
-function retargetOdometer(strip, start, target, digit) {
+  odometerMotion = new WeakMap(),
+  monthOdometerCells = new WeakMap(),
+  indexQuoteTimeParts = new WeakMap();
+function retargetOdometer(strip, start, target, digit, base = 10) {
   let motion = odometerMotion.get(strip);
   if (motion) {
     motion.target = target;
     motion.digit = digit;
+    motion.base = base;
     return;
   }
-  motion = { position: start, velocity: 0, target, digit, lastTime: performance.now() };
+  motion = { position: start, velocity: 0, target, digit, base, lastTime: performance.now() };
   odometerMotion.set(strip, motion);
   const tick = (now) => {
     const elapsed = Math.min(0.05, Math.max(0.001, (now - motion.lastTime) / 1000));
@@ -1107,7 +1147,7 @@ function retargetOdometer(strip, start, target, digit) {
     motion.position += motion.velocity * elapsed;
     strip.style.transform = `translateY(-${motion.position}em)`;
     if (Math.abs(motion.target - motion.position) < 0.012 && Math.abs(motion.velocity) < 0.06) {
-      strip.style.transform = `translateY(-${10 + motion.digit}em)`;
+      strip.style.transform = `translateY(-${motion.base + motion.digit}em)`;
       odometerMotion.delete(strip);
       return;
     }
@@ -1184,6 +1224,84 @@ function renderOdometer(element, value) {
     element.replaceChildren(...parts);
   odometerCells.set(element, cells);
 }
+function renderMonthOdometer(element, monthIndex) {
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+    cells = monthOdometerCells.get(element) || new Map(),
+    previous = cells.get(0),
+    base = months.length;
+  let cell = previous || null;
+  if (!cell) {
+    const strip = document.createElement("span");
+    strip.className = "odometer-strip";
+    strip.setAttribute("aria-hidden", "true");
+    for (let turn = 0; turn < 3; turn++)
+      for (const month of months) {
+        const face = document.createElement("span");
+        face.textContent = month;
+        strip.append(face);
+      }
+    element.replaceChildren(strip);
+    strip.style.transform = `translateY(-${base + monthIndex}em)`;
+    cell = { strip, value: monthIndex };
+  } else if (cell.value !== monthIndex) {
+    const { strip } = cell,
+      motion = odometerMotion.get(strip),
+      currentPosition = motion?.position ?? base + cell.value,
+      candidates = [monthIndex, monthIndex + base, monthIndex + base * 2],
+      target = candidates.sort((a, b) => Math.abs(a - currentPosition) - Math.abs(b - currentPosition))[0];
+    cell.value = monthIndex;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      if (motion?.frame) cancelAnimationFrame(motion.frame);
+      odometerMotion.delete(strip);
+      strip.style.transform = `translateY(-${base + monthIndex}em)`;
+    } else retargetOdometer(strip, currentPosition, target, monthIndex, base);
+  }
+  cells.set(0, cell);
+  monthOdometerCells.set(element, cells);
+}
+function renderIndexQuoteTime(timestamp) {
+  const element = $("index-quote-time"),
+    rangeMode = Number.isFinite(timestamp) && (window.chartSessionDays || []).length > 1;
+  if (!Number.isFinite(timestamp)) {
+    element.replaceChildren();
+    element.dataset.indexTimeMode = "";
+    element.dataset.odometerText = "";
+    odometerCells.delete(element);
+    indexQuoteTimeParts.delete(element);
+    element.removeAttribute("aria-label");
+    return;
+  }
+  const label = chartHoverLabel(timestamp);
+  element.setAttribute("aria-label", label);
+  if (!rangeMode) {
+    if (element.dataset.indexTimeMode === "range") {
+      element.replaceChildren();
+      odometerCells.delete(element);
+      delete element.dataset.odometerText;
+    }
+    element.dataset.indexTimeMode = "single";
+    renderOdometer(element, time(timestamp));
+    return;
+  }
+  let parts = indexQuoteTimeParts.get(element);
+  if (!parts || element.dataset.indexTimeMode !== "range") {
+    element.replaceChildren();
+    odometerCells.delete(element);
+    delete element.dataset.odometerText;
+    const day = document.createElement("span"),
+      month = document.createElement("span"),
+      clock = document.createElement("span");
+    month.className = "index-quote-time-month";
+    element.replaceChildren(day, document.createTextNode(" "), month, document.createTextNode(" · "), clock);
+    parts = { day, month, clock };
+    indexQuoteTimeParts.set(element, parts);
+    element.dataset.indexTimeMode = "range";
+  }
+  const date = new Date(`${istDay(timestamp)}T00:00:00Z`);
+  renderOdometer(parts.day, String(date.getUTCDate()));
+  renderMonthOdometer(parts.month, date.getUTCMonth());
+  renderOdometer(parts.clock, time(timestamp));
+}
 function updateIndexQuote(points, targetTime = null) {
   if (!points?.length) return;
   const { times, prices: values } = getIndexReadoutSeries(points),
@@ -1192,7 +1310,7 @@ function updateIndexQuote(points, targetTime = null) {
     previousClose = Number(points.previousClose) || values[0],
     change = price - previousClose,
     changePercent = previousClose ? (change / previousClose) * 100 : 0,
-    money = (amount) => HOVER_NUMBER_FORMAT.format(Math.abs(amount));
+    money = (amount) => MONEY_NUMBER_FORMAT.format(Math.abs(amount));
   renderOdometer($("index-quote-price"), `₹${money(price)}`);
   renderOdometer(
     $("index-quote-change"),
@@ -1200,13 +1318,11 @@ function updateIndexQuote(points, targetTime = null) {
   );
   $("index-quote-change").classList.toggle("green", change >= 0);
   $("index-quote-change").classList.toggle("red", change < 0);
-  const timeLabel = chartHoverLabel(timestamp);
-  if ($("index-quote-time").textContent !== timeLabel)
-    $("index-quote-time").textContent = timeLabel;
+  renderIndexQuoteTime(timestamp);
   clearTimeout(window.indexQuoteAnnouncementTimer);
   window.indexQuoteAnnouncementTimer = setTimeout(() => {
     $("index-quote-announcement").textContent =
-      `${marketInfo().name} ${HOVER_NUMBER_FORMAT.format(price)}, ${change >= 0 ? "up" : "down"} ${money(change)} rupees, ${Math.abs(changePercent).toFixed(2)} percent from previous close at ${time(timestamp)}.`;
+      `${marketInfo().name} ${MONEY_NUMBER_FORMAT.format(price)}, ${change >= 0 ? "up" : "down"} ${money(change)} rupees, ${Math.abs(changePercent).toFixed(2)} percent from previous close at ${time(timestamp)}.`;
   }, 300);
 }
 function scheduleHoverOnFrame(canvas, showHover) {
@@ -1333,19 +1449,11 @@ function saveState() {
   localStorage.setItem("pnl-baskets", JSON.stringify(state));
 }
 function formatDate(day) {
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${day}T00:00:00Z`));
+  return DATE_FORMAT.format(new Date(`${day}T00:00:00Z`));
 }
 function formatWeekday(day) {
   if (!day) return "";
-  return new Intl.DateTimeFormat("en-GB", {
-    weekday: "long",
-    timeZone: "UTC",
-  }).format(new Date(`${day}T00:00:00Z`));
+  return WEEKDAY_FORMAT.format(new Date(`${day}T00:00:00Z`));
 }
 function syncTradingDayExpiryNote() {
   const note = $("trading-day-expiry-note"),
@@ -1391,11 +1499,7 @@ function renderCalendar() {
     first = new Date(Date.UTC(year, month, 1)),
     days = new Date(Date.UTC(year, month + 1, 0)).getUTCDate(),
     offset = (first.getUTCDay() + 6) % 7;
-  $("month-label").textContent = new Intl.DateTimeFormat("en-IN", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(first);
+  $("month-label").textContent = MONTH_YEAR_FORMAT.format(first);
   const cells = [];
   for (let i = 0; i < offset; i++) {
     const blank = document.createElement("span");
@@ -1444,13 +1548,14 @@ function scheduleRefresh({ renderBasketCards = true } = {}) {
 }
 function refreshBasketCardValues(card, basket, index) {
   const result = window.basketPnlResults[basket.id],
-    valid = result?.day === dateField.value && result?.range === selectedChartRange;
+    valid = result?.day === dateField.value && result?.range === selectedChartRange,
+    positionsByIndex = new Map((valid ? result.positions : []).map((position) => [position.index, position]));
   card.style.setProperty("--basket-color", basketColor(index, valid ? result.ending : 0, basket.accentColor));
   const pnl = card.querySelector("[data-basket-pnl]");
   if (pnl) {
     const text = valid ? signed(result.ending) : "—";
     pnl.replaceChildren(...[...text].map((char) => {
-      if (!["+", "₹", ".", ","].includes(char)) return document.createTextNode(char);
+      if (!["+", "−", "-", "₹", ".", ","].includes(char)) return document.createTextNode(char);
       const glyph = document.createElement("span");
       glyph.className = "basket-head-raised-glyph";
       glyph.textContent = char;
@@ -1470,10 +1575,10 @@ function refreshBasketCardValues(card, basket, index) {
     fromClose = (change) => stats && cost > 0 ? percentChange(cost, cost + change) : "—",
     between = (from, to) => stats && cost > 0 && cost + from > 0 ? percentChange(cost + from, cost + to) : "—",
     performance = {
-      "max-profit": [stats ? signed(stats.maxProfit.value) : "—", stats?.maxProfit.t ? time(stats.maxProfit.t) : "", stats?.maxProfit.value > 0 ? "green" : "", stats?.maxProfit.t ? fromClose(stats.maxProfit.value) : "—"],
-      "max-loss": [stats ? stats.maxLoss.value < 0 ? signed(stats.maxLoss.value) : "−" + money(0) : "—", stats?.maxLoss.t ? time(stats.maxLoss.t) : "", stats?.maxLoss.value < 0 ? "red" : "", stats?.maxLoss.t ? fromClose(stats.maxLoss.value) : "—"],
-      "best-recovery": [stats ? signed(stats.maxDrawup.value) : "—", stats?.maxDrawup.to ? (stats.maxDrawup.from ? time(stats.maxDrawup.from) : "Open") + "–" + time(stats.maxDrawup.to) : "", stats?.maxDrawup.value > 0 ? "green" : "", stats?.maxDrawup.to ? between(stats.maxDrawup.fromPnl, stats.maxDrawup.toPnl) : "—"],
-      "largest-decline": [stats ? "−" + money(stats.maxDrawdown.value) : "—", stats?.maxDrawdown.to ? (stats.maxDrawdown.from ? time(stats.maxDrawdown.from) : "Open") + "–" + time(stats.maxDrawdown.to) : "", stats?.maxDrawdown.value > 0 ? "red" : "", stats?.maxDrawdown.to ? between(stats.maxDrawdown.fromPnl, stats.maxDrawdown.toPnl) : "—"],
+      "max-profit": [stats ? signed(stats.maxProfit.value) : "—", stats?.maxProfit.t ? basketPerformanceTime(stats.maxProfit.t) : "", stats?.maxProfit.value > 0 ? "green" : "", stats?.maxProfit.t ? fromClose(stats.maxProfit.value) : "—"],
+      "max-loss": [stats ? stats.maxLoss.value < 0 ? signed(stats.maxLoss.value) : "−" + money(0) : "—", stats?.maxLoss.t ? basketPerformanceTime(stats.maxLoss.t) : "", stats?.maxLoss.value < 0 ? "red" : "", stats?.maxLoss.t ? fromClose(stats.maxLoss.value) : "—"],
+      "best-recovery": [stats ? signed(stats.maxDrawup.value) : "—", stats?.maxDrawup.to ? (stats.maxDrawup.from ? basketPerformanceTime(stats.maxDrawup.from) : "Open") + "  →  " + basketPerformanceTime(stats.maxDrawup.to) : "", stats?.maxDrawup.value > 0 ? "green" : "", stats?.maxDrawup.to ? between(stats.maxDrawup.fromPnl, stats.maxDrawup.toPnl) : "—"],
+      "largest-decline": [stats ? "−" + money(stats.maxDrawdown.value) : "—", stats?.maxDrawdown.to ? (stats.maxDrawdown.from ? basketPerformanceTime(stats.maxDrawdown.from) : "Open") + "  →  " + basketPerformanceTime(stats.maxDrawdown.to) : "", stats?.maxDrawdown.value > 0 ? "red" : "", stats?.maxDrawdown.to ? between(stats.maxDrawdown.fromPnl, stats.maxDrawdown.toPnl) : "—"],
     };
   card.querySelectorAll(".performance-stat[data-metric]").forEach((item) => {
     const values = performance[item.dataset.metric];
@@ -1495,7 +1600,7 @@ function refreshBasketCardValues(card, basket, index) {
   card.querySelectorAll(".basket-item[data-position-index]").forEach((row) => {
     const positionIndex = Number(row.dataset.positionIndex),
       position = basket.items[positionIndex],
-      item = valid ? result.positions.find((entry) => entry.index === positionIndex) : null,
+      item = positionsByIndex.get(positionIndex) || null,
       prices = row.querySelector(".instrument-detail > span"),
       change = row.querySelector(".instrument-detail > strong"),
       totals = row.querySelectorAll(".position-total strong");
@@ -1541,9 +1646,10 @@ function refreshBasketCardValues(card, basket, index) {
   }
 }
 function renderRefreshedBaskets() {
-  const order = new Map(sortBasketInfo(state.baskets).map((basket, index) => [basket.id, index]));
+  const basketsById = new Map(state.baskets.map((basket) => [basket.id, basket])),
+    order = new Map(sortBasketInfo(state.baskets).map((basket, index) => [basket.id, index]));
   $("baskets").querySelectorAll(".basket[data-basket-id]").forEach((card) => {
-    const basket = state.baskets.find((item) => item.id === card.dataset.basketId);
+    const basket = basketsById.get(card.dataset.basketId);
     if (basket) refreshBasketCardValues(card, basket, order.get(basket.id) ?? 0);
   });
   const active = state.baskets.find((basket) => basket.id === window.activeScenarioBasketId);
@@ -1626,6 +1732,7 @@ function renderBaskets(options = {}) {
   const onlyBasketIds = options.onlyBasketIds ||
       (options.onlyBasketId ? [options.onlyBasketId] : null),
     incremental = Boolean(onlyBasketIds?.length),
+    basketIndexes = new Map(state.baskets.map((basket, index) => [basket.id, index])),
     orderedBaskets = sortBasketInfo(state.baskets),
     basketOrder = new Map(orderedBaskets.map((basket, index) => [basket.id, index])),
     oldCards = [...host.querySelectorAll(".basket[data-basket-id]")],
@@ -1662,9 +1769,10 @@ function renderBaskets(options = {}) {
   orderedBaskets
     .filter((basket) => !incremental || onlyBasketIds.includes(basket.id))
     .forEach((b) => {
-    const index = state.baskets.indexOf(b);
+    const index = basketIndexes.get(b.id) ?? 0;
     const result = window.basketPnlResults[b.id],
       valid = result?.day === dateField.value && result?.range === selectedChartRange,
+      resultPositions = new Map((valid ? result.positions : []).map((position) => [position.index, position])),
       displayName = basketDisplayName(b);
     const toggleScenario = () => {
       const previousId = window.activeScenarioBasketId;
@@ -1721,7 +1829,7 @@ function renderBaskets(options = {}) {
     pnl.style.cssText = "font-size:14px;white-space:nowrap";
     const pnlText = valid ? signed(result.ending) : "—";
     pnl.replaceChildren(...[...pnlText].map((char) => {
-      if (!["+", "₹", ".", ","].includes(char)) return document.createTextNode(char);
+      if (!["+", "−", "-", "₹", ".", ","].includes(char)) return document.createTextNode(char);
       const glyph = document.createElement("span");
       glyph.className = "basket-head-raised-glyph";
       glyph.textContent = char;
@@ -1937,7 +2045,7 @@ function renderBaskets(options = {}) {
       [
         "Max profit",
         stats ? signed(stats.maxProfit.value) : "—",
-        stats && stats.maxProfit.t ? time(stats.maxProfit.t) : "",
+        stats && stats.maxProfit.t ? basketPerformanceTime(stats.maxProfit.t) : "",
         stats && stats.maxProfit.value > 0 ? "green" : "",
         stats && stats.maxProfit.t
           ? percentFromPreviousClose(stats.maxProfit.value)
@@ -1950,7 +2058,7 @@ function renderBaskets(options = {}) {
             ? signed(stats.maxLoss.value)
             : `−${money(0)}`
           : "—",
-        stats && stats.maxLoss.t ? time(stats.maxLoss.t) : "",
+        stats && stats.maxLoss.t ? basketPerformanceTime(stats.maxLoss.t) : "",
         stats && stats.maxLoss.value < 0 ? "red" : "",
         stats && stats.maxLoss.t
           ? percentFromPreviousClose(stats.maxLoss.value)
@@ -1960,7 +2068,7 @@ function renderBaskets(options = {}) {
         "Best recovery",
         stats ? signed(stats.maxDrawup.value) : "—",
         stats && stats.maxDrawup.to
-          ? `${stats.maxDrawup.from ? time(stats.maxDrawup.from) : "Open"}–${time(stats.maxDrawup.to)}`
+          ? `${stats.maxDrawup.from ? basketPerformanceTime(stats.maxDrawup.from) : "Open"}  →  ${basketPerformanceTime(stats.maxDrawup.to)}`
           : "",
         stats && stats.maxDrawup.value > 0 ? "green" : "",
         stats && stats.maxDrawup.to
@@ -1971,7 +2079,7 @@ function renderBaskets(options = {}) {
         "Largest decline",
         stats ? `−${money(stats.maxDrawdown.value)}` : "—",
         stats && stats.maxDrawdown.to
-          ? `${stats.maxDrawdown.from ? time(stats.maxDrawdown.from) : "Open"}–${time(stats.maxDrawdown.to)}`
+          ? `${stats.maxDrawdown.from ? basketPerformanceTime(stats.maxDrawdown.from) : "Open"}  →  ${basketPerformanceTime(stats.maxDrawdown.to)}`
           : "",
         stats && stats.maxDrawdown.value > 0 ? "red" : "",
         stats && stats.maxDrawdown.to
@@ -2075,9 +2183,7 @@ function renderBaskets(options = {}) {
       titleLine.append(label, lotControl);
       info.append(titleLine);
       updateLotControl();
-      const instrumentResult = valid
-          ? result.positions.find((x) => x.index === i)
-          : null,
+      const instrumentResult = resultPositions.get(i) || null,
         detail = document.createElement("small"),
         prices = document.createElement("span"),
         change = document.createElement("strong"),
@@ -2320,11 +2426,13 @@ function renderBaskets(options = {}) {
     card.append(head);
     if (structure.childElementCount) card.append(structure);
     card.append(metrics, performance, list, scenarioPanel);
-    const order = basketOrder.get(b.id),
-      followingCard = [...host.querySelectorAll(".basket[data-basket-id]")].find(
-        (existing) => basketOrder.get(existing.dataset.basketId) > order,
-      );
-    host.insertBefore(card, followingCard || null);
+    if (incremental) {
+      const order = basketOrder.get(b.id),
+        followingCard = [...host.querySelectorAll(".basket[data-basket-id]")].find(
+          (existing) => basketOrder.get(existing.dataset.basketId) > order,
+        );
+      host.insertBefore(card, followingCard || null);
+    } else host.append(card);
     const scenarioRef = window.scenarioChartRefs.at(-1);
     if (scenarioRef?.canvas.closest(".basket") === card)
       drawScenarioChart(
@@ -2447,8 +2555,9 @@ function renderBulkOffsetOptions(selectedOffsets = new Set()) {
   }
 }
 function selectDefaultStrangleOffsets() {
-  const offsetStep = selectedChartRange === "1D" ? 100 : 500,
-    defaults = new Set(Array.from({ length: 6 }, (_, index) => index * offsetStep));
+  const defaults = selectedChartRange === "1D"
+    ? new Set(Array.from({ length: 6 }, (_, index) => index * 100))
+    : new Set([500, 1000]);
   document.querySelectorAll('input[name="basket-offset-toggle"]').forEach((input) => {
     input.checked = defaults.has(Number(input.value));
   });
@@ -2614,6 +2723,7 @@ async function replaceBulkStranglesAtCenter(center, requestId, autoCenter = fals
           customName: false,
           enabled: true,
           accentColor: basketAccentHex(assignedColors),
+          bulkCenter: Number(pick.center),
           bulkOffset: Number(pick.offset),
           bulkKind: kind,
           items: bulkBasketItems(pick, kind),
@@ -2693,6 +2803,7 @@ async function toggleBulkBasketOffset(input) {
       customName: false,
       enabled: true,
       accentColor: nextBasketAccentColor(),
+      bulkCenter: Number(pick.center),
       bulkOffset: offset,
       bulkKind: request.kind,
       items: bulkBasketItems(pick, request.kind),
@@ -3077,6 +3188,7 @@ function addSimpleStrangle() {
       customName: false,
       enabled: true,
       accentColor: nextBasketAccentColor(),
+      bulkCenter: Number(pick.center),
       bulkOffset: Number(pick.offset),
       bulkKind: "STRANGLE",
       items: [pick.call, pick.put].map((leg) => ({
@@ -3352,17 +3464,10 @@ function setOptionMode(mode) {
   else scheduleManualOptionPreview();
 }
 function formatSmartMoney(value) {
-  return `₹${Number(value).toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  return `₹${MONEY_NUMBER_FORMAT.format(Number(value))}`;
 }
 function formatSmartDate(day) {
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  }).format(new Date(`${day}T00:00:00Z`));
+  return DATE_SHORT_IN_FORMAT.format(new Date(`${day}T00:00:00Z`));
 }
 function normalizeSmartOffset(value) {
   if (!Number.isFinite(value)) return null;
@@ -3568,41 +3673,25 @@ function addDays(day, n) {
   return d.toISOString().slice(0, 10);
 }
 function istDay(ts) {
-  return new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    timeZone: "Asia/Kolkata",
-  }).format(new Date(ts * 1000));
+  return new Date((Math.floor(ts) + 19800) * 1000).toISOString().slice(0, 10);
 }
 function money(v) {
-  return (
-    "₹" +
-    Math.abs(v).toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  );
+  return "₹" + MONEY_NUMBER_FORMAT.format(Math.abs(v));
 }
 function signed(v) {
   return `${v >= 0 ? "+" : "−"}${money(v)}`;
 }
 function time(ts) {
-  return new Intl.DateTimeFormat("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Kolkata",
-  }).format(new Date(ts * 1000));
+  const minutes = ((Math.floor(ts / 60) + 330) % 1440 + 1440) % 1440;
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 }
 function positionName(p) {
   return `${marketInfo().name} ${p.strike} ${p.optionType} · ${p.expiry}`;
 }
 function strangleCenterOffset(callStrike, putStrike) {
   const center = (Number(callStrike) + Number(putStrike)) / 2,
-    distance = Math.abs(Number(callStrike) - Number(putStrike)) / 2,
-    format = (value) => value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
-  return `${format(center)} ± ${format(distance)}`;
+    distance = Math.abs(Number(callStrike) - Number(putStrike)) / 2;
+  return `${CENTER_NUMBER_FORMAT.format(center)} ± ${CENTER_NUMBER_FORMAT.format(distance)}`;
 }
 function basketDisplayName(b) {
   if (
@@ -3615,14 +3704,22 @@ function basketDisplayName(b) {
   const expiries = [...new Set(items.map((p) => p.expiry))],
     expiryLabel =
       expiries.length === 1
-        ? new Intl.DateTimeFormat("en-IN", {
-            day: "numeric",
-            month: "short",
-            timeZone: "UTC",
-          }).format(new Date(`${expiries[0]}T00:00:00Z`))
+        ? DATE_SHORT_IN_FORMAT.format(new Date(`${expiries[0]}T00:00:00Z`))
         : "";
-  if (items.length === 1)
+  if (items.length === 1) {
+    if (["CALL", "PUT"].includes(bulkBasketKind(b)) && Number.isFinite(Number(b.bulkOffset))) {
+      const option = items[0],
+        offset = Number(b.bulkOffset),
+        center = Number.isFinite(Number(b.bulkCenter))
+          ? Number(b.bulkCenter)
+          : Number(option.strike) - (option.optionType === "CE" ? offset : -offset),
+        operation = (option.optionType === "CE" ? offset : -offset) < 0 ? "−" : "+",
+        format = (value) => value.toLocaleString("en-IN", { maximumFractionDigits: 2 }),
+        side = option.optionType === "CE" ? "Call" : "Put";
+      return `Long ${side} · ${format(center)} ${operation} ${format(Math.abs(offset))}${expiryLabel ? ` · ${expiryLabel}` : ""}`;
+    }
     return `${items[0].strike} ${items[0].optionType}${expiryLabel ? ` · ${expiryLabel}` : ""}`;
+  }
   if (items.length === 2 && expiries.length === 1) {
     const call = items.find((p) => p.optionType === "CE"),
       put = items.find((p) => p.optionType === "PE");
@@ -3648,34 +3745,31 @@ function basketDisplayName(b) {
     ? `${items.length}-leg combo${expiryLabel ? ` · ${expiryLabel}` : ""}`
     : `Multi-expiry · ${items.length} legs`;
 }
+const basketNameCollator = new Intl.Collator("en", { numeric: true });
 function sortBasketInfo(entries) {
-  const strikePair = (entry) => {
-    const basket = state.baskets.find((candidate) => candidate.id === entry.id);
-    const items = basket?.items || [];
-    const putStrike = Number(
-      items.find((item) => item.optionType === "PE")?.strike,
-    );
-    const callStrike = Number(
-      items.find((item) => item.optionType === "CE")?.strike,
-    );
-    if (Number.isFinite(putStrike))
-      return [putStrike, Number.isFinite(callStrike) ? callStrike : Infinity];
-    const match = String(entry.name || "").match(/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)/);
-    return match ? [Number(match[1]), Number(match[2])] : [Infinity, Infinity];
-  };
-  return [...entries].sort(
-    (a, b) => {
-      const [aPut, aCall] = strikePair(a),
-        [bPut, bCall] = strikePair(b);
-      return (
-        aPut - bPut ||
-        aCall - bCall ||
-        String(a.name || "").localeCompare(String(b.name || ""), "en", {
-        numeric: true,
-        })
-      );
-    },
-  );
+  const basketsById = new Map(state.baskets.map((basket) => [basket.id, basket]));
+  return entries
+    .map((entry, index) => {
+      const items = basketsById.get(entry.id)?.items || [],
+        putStrike = Number(items.find((item) => item.optionType === "PE")?.strike),
+        callStrike = Number(items.find((item) => item.optionType === "CE")?.strike),
+        match = String(entry.name || "").match(/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)/),
+        fallback = match ? [Number(match[1]), Number(match[2])] : [Infinity, Infinity];
+      return {
+        entry,
+        index,
+        put: Number.isFinite(putStrike) ? putStrike : fallback[0],
+        call: Number.isFinite(callStrike) ? callStrike : fallback[1],
+        name: String(entry.name || ""),
+      };
+    })
+    .sort((a, b) =>
+      a.put - b.put ||
+      a.call - b.call ||
+      basketNameCollator.compare(a.name, b.name) ||
+      a.index - b.index,
+    )
+    .map(({ entry }) => entry);
 }
 function basketInfoName(entry) {
   const basket = state.baskets.find((candidate) => candidate.id === entry.id);
@@ -3844,7 +3938,7 @@ async function loadExpiries() {
     if (initializeDefaultBasketsOnStart && !state.baskets.length && select.value) {
       initializeDefaultBasketsOnStart = false;
       selectDefaultStrangleOffsets();
-      showBasketTransition("Building default strangles…");
+      showBasketTransition("Building default baskets…");
       await addDefaultDateBaskets(
         dateField.value,
         select.value,
@@ -3886,12 +3980,7 @@ function renderExpiries() {
   values.forEach((d) =>
     select.add(
       new Option(
-        new Intl.DateTimeFormat("en-IN", {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-          timeZone: "UTC",
-        }).format(new Date(`${d}T00:00:00Z`)),
+        DATE_FULL_IN_FORMAT.format(new Date(`${d}T00:00:00Z`)),
         d,
       ),
     ),
@@ -4456,7 +4545,14 @@ function scenarioPnlAt(legs, spot) {
     0,
   );
 }
-function buildScenario(basket, positions, indexPoints, day, fallbackVol = 0.2) {
+function buildScenario(
+  basket,
+  positions,
+  indexPoints,
+  day,
+  fallbackVol = 0.2,
+  inferredVols = null,
+) {
   if (!indexPoints?.length) return { error: `${marketInfo().name} close is unavailable.` };
   const actualSpot = indexPoints.at(-1).value,
     legs = [];
@@ -4471,8 +4567,7 @@ function buildScenario(basket, positions, indexPoints, day, fallbackVol = 0.2) {
         1000 /
         SECONDS_PER_YEAR,
     );
-    let sigma =
-      T > 0 ? inferScenarioVol(result, position, indexPoints, day) : 0;
+    let sigma = T > 0 ? inferredVols?.get(result.index) : 0;
     if (T > 0 && !Number.isFinite(sigma)) {
       sigma = fallbackVol;
       fallbackCount++;
@@ -4702,28 +4797,31 @@ async function loadTrade(
       showError(notes.join(" "));
       $("error").classList.add("is-info");
     }
-    const basketVols = data
-        .flatMap((b) => {
-          const basket = state.baskets.find((x) => x.id === b.id);
-          return basket
-            ? b.positions
-                .map((position) =>
-                  inferScenarioVol(
-                    position,
-                    basket.items[position.index],
-                    indexResult.points || [],
-                    day,
-                  ),
-                )
-                .filter(Number.isFinite)
-            : [];
-        })
-        .sort((a, b) => a - b),
-      portfolioVol = basketVols.length
+    const basketsById = new Map(state.baskets.map((basket) => [basket.id, basket])),
+      inferredVolsByBasket = new Map(),
+      basketVols = [];
+    for (const result of data) {
+      const basket = basketsById.get(result.id);
+      if (!basket) continue;
+      const inferredVols = new Map();
+      for (const position of result.positions) {
+        const volatility = inferScenarioVol(
+          position,
+          basket.items[position.index],
+          indexResult.points || [],
+          day,
+        );
+        inferredVols.set(position.index, volatility);
+        if (Number.isFinite(volatility)) basketVols.push(volatility);
+      }
+      inferredVolsByBasket.set(result.id, inferredVols);
+    }
+    basketVols.sort((a, b) => a - b);
+    const portfolioVol = basketVols.length
         ? basketVols[Math.floor(basketVols.length / 2)]
         : 0.2;
     data.forEach((b) => {
-      const basket = state.baskets.find((x) => x.id === b.id);
+      const basket = basketsById.get(b.id);
       b.scenario = basket
         ? buildScenario(
             basket,
@@ -4731,6 +4829,7 @@ async function loadTrade(
             indexResult.points,
             day,
             portfolioVol,
+            inferredVolsByBasket.get(b.id),
           )
         : null;
     });
@@ -5021,6 +5120,7 @@ function drawScenarioChart(
     Y = (v) =>
       p.t + (h - p.t - p.b) * (1 - (v - yAxis.min) / (yAxis.max - yAxis.min)),
     X = (i) => Xspot(points[i].spot);
+  ctx.clearRect(0, 0, w, h);
   ctx.font = "10px system-ui";
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
@@ -5281,9 +5381,12 @@ function drawDaySeparators(ctx, p, w, bottom) {
 }
 function chartTickLabel(timestamp) {
   if ((window.chartSessionDays || []).length <= 1) return time(timestamp);
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric", month: "short", timeZone: "UTC",
-  }).format(new Date(`${istDay(timestamp)}T00:00:00Z`));
+  return DATE_SHORT_FORMAT.format(new Date(`${istDay(timestamp)}T00:00:00Z`));
+}
+function basketPerformanceTime(timestamp) {
+  if (selectedChartRange === "1D") return time(timestamp);
+  const dayLabel = DATE_SHORT_FORMAT.format(new Date(`${istDay(timestamp)}T00:00:00Z`));
+  return `${dayLabel} · ${time(timestamp)}`;
 }
 function chartHoverLabel(timestamp) {
   return (window.chartSessionDays || []).length <= 1
@@ -5298,7 +5401,8 @@ function chartTimeAtFraction(fraction) {
 }
 function snapChartHoverTime(timestamp) {
   const ticks = window.miniChartData?.index?.points?.map((point) => point.t) || [];
-  return ticks.length ? ticks[nearestTimeIndex(ticks, timestamp)] : timestamp;
+  if (!ticks.length || timestamp > ticks.at(-1)) return timestamp;
+  return ticks[nearestTimeIndex(ticks, timestamp)];
 }
 function darkerColor(color) {
   let h, s, l;
@@ -5336,16 +5440,16 @@ function minimalBasketName(name) {
 }
 function drawSignedLine(ctx, values, color, X, Y, width = 2.5) {
   if (values.length < 2) return;
-  const dark = darkerColor(color),
-    stroke = (x1, y1, x2, y2, c) => {
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.strokeStyle = c;
-      ctx.lineWidth = width;
-      ctx.lineJoin = "round";
-      ctx.lineCap = "round";
-      ctx.stroke();
+  const paths = [new Path2D(), new Path2D()],
+    tails = [null, null],
+    append = (negative, x1, y1, x2, y2) => {
+      const pathIndex = negative ? 1 : 0,
+        path = paths[pathIndex],
+        tail = tails[pathIndex];
+      if (!tail || Math.abs(tail[0] - x1) > 0.01 || Math.abs(tail[1] - y1) > 0.01)
+        path.moveTo(x1, y1);
+      path.lineTo(x2, y2);
+      tails[pathIndex] = [x2, y2];
     };
   for (let i = 1; i < values.length; i++) {
     const a = values[i - 1],
@@ -5358,10 +5462,17 @@ function drawSignedLine(ctx, values, color, X, Y, width = 2.5) {
       const t = a / (a - b),
         xc = x1 + (x2 - x1) * t,
         yc = y1 + (y2 - y1) * t;
-      stroke(x1, y1, xc, yc, a < 0 ? dark : color);
-      stroke(xc, yc, x2, y2, b < 0 ? dark : color);
-    } else stroke(x1, y1, x2, y2, (a + b) / 2 < 0 ? dark : color);
+      append(a < 0, x1, y1, xc, yc);
+      append(b < 0, xc, yc, x2, y2);
+    } else append((a + b) / 2 < 0, x1, y1, x2, y2);
   }
+  ctx.lineWidth = width;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = color;
+  ctx.stroke(paths[0]);
+  ctx.strokeStyle = darkerColor(color);
+  ctx.stroke(paths[1]);
 }
 function drawMiniPlots(data) {
   const niftyCanvas = $("nifty-chart"),
@@ -5372,7 +5483,7 @@ function drawMiniPlots(data) {
   } else {
     $("index-quote-price").textContent = "—";
     $("index-quote-change").textContent = "";
-    $("index-quote-time").textContent = "";
+    renderIndexQuoteTime(null);
   }
   if (data.index.points?.length) {
     niftyStatus.hidden = true;
@@ -5506,10 +5617,11 @@ function drawNiftyPlot(canvas, points, previousClose) {
     if (i < 0) return;
     const crosshairTime = window.chartCrosshairTime ?? window.linkedHoverTime,
       hoverX = chartX(crosshairTime, p, w),
-      hoverValue = interpolateAtChartTime(pointTimes, values, crosshairTime),
+      selectedX = chartX(points[i].t, p, w),
+      hoverValue = values[i],
       y = Y(hoverValue);
     drawHoverCrosshair(ctx, hoverX, p.t, h - p.b);
-    drawHoverMarker(ctx, hoverX, y, hoverValue >= baseline ? green : red);
+    drawHoverMarker(ctx, selectedX, y, hoverValue >= baseline ? green : red);
   };
   savePlotBase(canvas, [points, previousClose], box, ratio, drawOverlay);
   drawOverlay();
@@ -5559,15 +5671,19 @@ function drawMiniPlot(canvas, times, series, mode) {
     p = { l: 58, r: 14, t: 12, b: 28 };
   ctx.clearRect(0, 0, w, h);
   if (restorePlotBase(canvas, [times, series, mode], box, ratio, ctx)) return;
-  const
-    values = series.flatMap((s) => s.values),
-    rawMin = Math.min(...values, ...(mode === "percent" ? [0] : [])),
-    rawMax = Math.max(...values, ...(mode === "percent" ? [0] : [])),
-    span = rawMax - rawMin || 1,
+  let rawMin = mode === "percent" ? 0 : Infinity,
+    rawMax = mode === "percent" ? 0 : -Infinity;
+  for (const line of series)
+    for (const value of line.values) {
+      rawMin = Math.min(rawMin, value);
+      rawMax = Math.max(rawMax, value);
+    }
+  const span = rawMax - rawMin || 1,
     axis = niceAxis(rawMin - span * 0.08, rawMax + span * 0.08),
     min = axis.min,
     max = axis.max,
-    X = (i) => chartX(times[i], p, w),
+    xPositions = times.map((timestamp) => chartX(timestamp, p, w)),
+    X = (i) => xPositions[i],
     Y = (v) => p.t + (h - p.t - p.b) * (1 - (v - min) / (max - min));
   ctx.font = "10px system-ui";
   ctx.textAlign = "right";
@@ -5608,9 +5724,10 @@ function drawMiniPlot(canvas, times, series, mode) {
     const crosshairTime = window.chartCrosshairTime ?? window.linkedHoverTime,
       hoverX = chartX(crosshairTime, p, w);
     drawHoverCrosshair(ctx, hoverX, p.t, h - p.b);
+    const i = nearestTimeIndex(times, window.linkedHoverTime),
+      selectedX = chartX(times[i], p, w);
     series.forEach((s) => {
-      const hoverValue = interpolateAtChartTime(times, s.values, crosshairTime);
-      drawHoverMarker(ctx, hoverX, Y(hoverValue), s.color);
+      drawHoverMarker(ctx, selectedX, Y(s.values[i]), s.color);
     });
   };
   savePlotBase(canvas, [times, series, mode], box, ratio, drawOverlay);
@@ -5829,14 +5946,20 @@ function draw(d) {
     p = { l: 58, r: 14, t: 18, b: 32 };
   ctx.clearRect(0, 0, w, h);
   if (restorePlotBase(c, [d], box, ratio, ctx)) return;
-  const
-    vals = d.series.flatMap((s) => s.values),
-    lo = Math.min(0, ...vals),
-    hi = Math.max(0, ...vals),
-    axis = niceAxis(lo - (hi - lo || 1) * 0.08, hi + (hi - lo || 1) * 0.08),
+  let lo = 0, hi = 0;
+  for (const point of d.series)
+    for (const value of point.values) {
+      lo = Math.min(lo, value);
+      hi = Math.max(hi, value);
+    }
+  const axis = niceAxis(lo - (hi - lo || 1) * 0.08, hi + (hi - lo || 1) * 0.08),
     min = axis.min,
     max = axis.max,
-    X = (i) => chartX(d.times[i], p, w),
+    xPositions = d.times.map((timestamp) => chartX(timestamp, p, w)),
+    X = (i) => xPositions[i],
+    seriesByBasket = d.baskets.map((_, index) =>
+      d.series.map((point) => point.values[index]),
+    ),
     Y = (v) => p.t + (h - p.t - p.b) * (1 - (v - min) / (max - min));
   ctx.font = "11px system-ui";
   ctx.textAlign = "right";
@@ -5863,7 +5986,7 @@ function draw(d) {
   d.baskets.forEach((b, j) =>
     drawSignedLine(
       ctx,
-      d.series.map((s) => s.values[j]),
+      seriesByBasket[j],
       b.color,
       X,
       Y,
@@ -5875,21 +5998,15 @@ function draw(d) {
   ctx.textBaseline = "top";
   for (const t of chartTimeTicks())
     ctx.fillText(chartTickLabel(t), chartX(t, p, w), h - p.b + 10);
-  const seriesByBasket = d.baskets.map((_, index) =>
-    d.series.map((point) => point.values[index]),
-  );
   const drawOverlay = () => {
     if (window.hoverIndex == null) return;
     const crosshairTime = window.chartCrosshairTime ?? window.linkedHoverTime,
-      hoverX = chartX(crosshairTime, p, w);
+      hoverX = chartX(crosshairTime, p, w),
+      i = nearestTimeIndex(d.times, window.linkedHoverTime),
+      selectedX = chartX(d.times[i], p, w);
     drawHoverCrosshair(ctx, hoverX, p.t, h - p.b);
     d.baskets.forEach((basket, index) => {
-      const hoverValue = interpolateAtChartTime(
-        d.times,
-        seriesByBasket[index],
-        crosshairTime,
-      );
-      drawHoverMarker(ctx, hoverX, Y(hoverValue), basket.color);
+      drawHoverMarker(ctx, selectedX, Y(seriesByBasket[index][i]), basket.color);
     });
   };
   savePlotBase(c, [d], box, ratio, drawOverlay);
